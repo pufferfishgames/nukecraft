@@ -14,6 +14,7 @@ function makeInstMesh(type, maxCount) {
   })
   const mesh = new THREE.InstancedMesh(geo, mat, maxCount)
   mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+  mesh.frustumCulled = false
   mesh.count = 0
   mesh.userData.type = type
   mesh.userData.maxCount = maxCount
@@ -136,7 +137,7 @@ export function createWorldManager(scene, initialBlocks) {
     },
 
     getBlockFromHit(hit) {
-      const type = hit.object.userData.type
+      const type = hit.object.userData?.type
       if (type === undefined) return null
       const arr = blockArrays.get(type)
       return arr ? { ...arr[hit.instanceId] } : null

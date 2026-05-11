@@ -115,11 +115,11 @@
     { type: BlockType.STONE,       label: 'Stone' },
     { type: BlockType.GRASS,       label: 'Grass' },
     { type: BlockType.SAND,        label: 'Sand' },
+    { type: BlockType.WATER,       label: 'Water' },
     { type: BlockType.WOOD,        label: 'Wood' },
     { type: BlockType.LEAVES,      label: 'Leaves' },
     { type: BlockType.STONE_BRICK, label: 'Brick' },
     { type: BlockType.CONCRETE,    label: 'Concrete' },
-    { type: BlockType.GRAVEL,      label: 'Gravel' },
     { type: BlockType.NUKE,        label: '☢ Nuke', symbol: '☢' },
   ]
 
@@ -661,17 +661,17 @@
 
   .hotbar {
     position: fixed;
-    bottom: 16px;
+    bottom: 12px;
     left: 50%;
     transform: translateX(-50%);
     display: flex;
-    gap: 4px;
+    gap: 3px;
     pointer-events: none;
   }
 
   .hotbar-slot {
-    width: 44px;
-    height: 44px;
+    width: 36px;
+    height: 36px;
     border: 2px solid rgba(255, 255, 255, 0.35);
     border-radius: 4px;
     position: relative;
