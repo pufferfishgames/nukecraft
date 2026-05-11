@@ -2,13 +2,13 @@ import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js'
 import { schnorr } from '@noble/curves/secp256k1.js'
 
-export function createMapEvent(pubkey, blocks) {
+export function createMapEvent(pubkey, content) {
   return {
     kind: 30078,
     pubkey,
     created_at: Math.floor(Date.now() / 1000),
     tags: [['d', 'pufferfishgames/nukecraft']],
-    content: JSON.stringify(blocks),
+    content,
   }
 }
 

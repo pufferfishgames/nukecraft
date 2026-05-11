@@ -11,7 +11,7 @@
   import { createMapEvent, signEvent } from './nostr/events.js'
   import { mineEvent, MIN_POW_DIFFICULTY } from './nostr/pow.js'
   import { publishMap, fetchMaps } from './nostr/relay.js'
-  import { decodeBlocks } from './nostr/codec.js'
+  import { encodeBlocks, decodeBlocks } from './nostr/codec.js'
 
   const RELAY_URL = 'wss://nos.lol'
 
@@ -41,11 +41,13 @@
 
   async function openNostr() {
     showNostr = true
+    document.body.classList.add('nostr-open')
     if (document.pointerLockElement === canvas) document.exitPointerLock()
   }
 
   function closeNostr() {
     showNostr = false
+    document.body.classList.remove('nostr-open')
     if (!overlay) canvas?.requestPointerLock()
   }
 
@@ -54,7 +56,8 @@
     saveStatus = 'saving'
     try {
       const blocks = worldManager.getBlocks()
-      const event = createMapEvent(pubkey, blocks)
+      const content = await encodeBlocks(blocks)
+      const event = createMapEvent(pubkey, content)
       const mined = mineEvent(event, MIN_POW_DIFFICULTY)
       const signed = signEvent(mined, privkey)
       await publishMap(RELAY_URL, signed)
@@ -407,8 +410,6 @@
     }
   })
 </script>
-
-<svelte:body class:nostr-open={showNostr} />
 
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 <canvas
