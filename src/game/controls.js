@@ -1,9 +1,10 @@
 export const KEYS = {
-  FORWARD: ['KeyW', 'ArrowUp'],
+  FORWARD:  ['KeyW', 'ArrowUp'],
   BACKWARD: ['KeyS', 'ArrowDown'],
-  LEFT: ['KeyA', 'ArrowLeft'],
-  RIGHT: ['KeyD', 'ArrowRight'],
-  JUMP: ['Space'],
+  LEFT:     ['KeyA', 'ArrowLeft'],
+  RIGHT:    ['KeyD', 'ArrowRight'],
+  JUMP:     ['Space'],
+  DESCEND:  ['ShiftLeft', 'ShiftRight'],
 }
 
 export function createKeyboardState() {

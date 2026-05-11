@@ -4,6 +4,7 @@
   import { createRenderer } from './game/renderer.js'
   import { createKeyboardState, computeMovement, computeMovementAxes, KEYS } from './game/controls.js'
   import { joystickAxes, touchLookDelta, JOYSTICK_RADIUS, TOUCH_SENSITIVITY } from './game/touch.js'
+  import { applyGravity, applyJump, applyDescend, resolveGround, PLAYER_EYE_HEIGHT } from './game/physics.js'
   import { BlockType, BLOCK_COLORS } from './game/world.js'
 
   let canvas
@@ -11,7 +12,7 @@
   let selectedSlot = 0
   let isMobile = false
 
-  const PLAYER_SPEED = 5
+  const PLAYER_SPEED  = 5
   const MOUSE_SENSITIVITY = 0.002
   const REACH = 5
 
@@ -32,22 +33,18 @@
     return '#' + hex.toString(16).padStart(6, '0')
   }
 
-  // ── Mobile joystick state ──────────────────────────────────────────────────
+  // ── Mobile touch state ─────────────────────────────────────────────────────
   let joystickTouchId = null
-  let joystickAnchor = null   // { x, y } — where touch started
-  let joystickPos    = null   // { x, y } — current touch
+  let joystickAnchor  = null
+  let joystickPos     = null
   let joystickDx = 0
   let joystickDz = 0
-
-  // ── Mobile look state ──────────────────────────────────────────────────────
   let lookTouchId = null
   let lookLastX = 0
   let lookLastY = 0
+  let mobileJump    = false
+  let mobileDescend = false
 
-  // ── Mobile action state ────────────────────────────────────────────────────
-  let mobileJump = false
-
-  // Computed thumb position clamped to joystick circle
   $: joystickThumb = (() => {
     if (!joystickAnchor || !joystickPos) return null
     const dx = joystickPos.x - joystickAnchor.x
@@ -60,7 +57,6 @@
     }
   })()
 
-  // ── Break / place (called from both mobile buttons and desktop clicks) ─────
   let _breakBlock = () => {}
   let _placeBlock = () => {}
 
@@ -80,12 +76,16 @@
       if (document.pointerLockElement !== canvas) overlay = true
     })
 
-    // ── Shared raycast helpers ───────────────────────────────────────────────
     let yaw = Math.PI * 1.25
     let pitch = -0.3
     camera.rotation.y = yaw
     camera.rotation.x = pitch
 
+    // Physics state (frame-local, not reactive)
+    let velocityY  = 0
+    let isGrounded = false
+
+    // ── Raycast helpers ──────────────────────────────────────────────────────
     function raycastTarget() {
       const raycaster = new THREE.Raycaster()
       raycaster.setFromCamera({ x: 0, y: 0 }, camera)
@@ -115,7 +115,7 @@
       })
     }
 
-    // ── Desktop keyboard ─────────────────────────────────────────────────────
+    // ── Keyboard ─────────────────────────────────────────────────────────────
     const keyboard = createKeyboardState()
 
     function onKeyDown(e) {
@@ -131,10 +131,10 @@
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', keyboard.onKeyUp)
 
-    // ── Desktop mouse look ───────────────────────────────────────────────────
+    // ── Mouse look (desktop) ─────────────────────────────────────────────────
     document.addEventListener('mousemove', (e) => {
       if (document.pointerLockElement !== canvas) return
-      yaw -= e.movementX * MOUSE_SENSITIVITY
+      yaw   -= e.movementX * MOUSE_SENSITIVITY
       pitch -= e.movementY * MOUSE_SENSITIVITY
       pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, pitch))
       camera.rotation.y = yaw
@@ -163,8 +163,8 @@
         const leftZone = t.clientX < window.innerWidth * 0.45
         if (leftZone && joystickTouchId === null) {
           joystickTouchId = t.identifier
-          joystickAnchor = { x: t.clientX, y: t.clientY }
-          joystickPos    = { x: t.clientX, y: t.clientY }
+          joystickAnchor  = { x: t.clientX, y: t.clientY }
+          joystickPos     = { x: t.clientX, y: t.clientY }
           joystickDx = joystickDz = 0
         } else if (!leftZone && lookTouchId === null) {
           lookTouchId = t.identifier
@@ -184,8 +184,10 @@
           joystickDz = axes.dz
         }
         if (t.identifier === lookTouchId) {
-          const { dyaw, dpitch } = touchLookDelta(t.clientX - lookLastX, t.clientY - lookLastY, TOUCH_SENSITIVITY)
-          yaw += dyaw
+          const { dyaw, dpitch } = touchLookDelta(
+            t.clientX - lookLastX, t.clientY - lookLastY, TOUCH_SENSITIVITY,
+          )
+          yaw   += dyaw
           pitch += dpitch
           pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, pitch))
           camera.rotation.y = yaw
@@ -199,9 +201,7 @@
     function onTouchEnd(e) {
       for (const t of e.changedTouches) {
         if (t.identifier === joystickTouchId) {
-          joystickTouchId = null
-          joystickAnchor  = null
-          joystickPos     = null
+          joystickTouchId = null; joystickAnchor = null; joystickPos = null
           joystickDx = joystickDz = 0
         }
         if (t.identifier === lookTouchId) lookTouchId = null
@@ -213,22 +213,35 @@
     canvas.addEventListener('touchend',    onTouchEnd)
     canvas.addEventListener('touchcancel', onTouchEnd)
 
-    // ── Game loop ────────────────────────────────────────────────────────────
+    // ── Game loop ─────────────────────────────────────────────────────────────
     let last = performance.now()
     function loop(now) {
       const delta = Math.min((now - last) / 1000, 0.1)
       last = now
 
-      let move
-      if (isMobile) {
-        move = computeMovementAxes(joystickDx, joystickDz, yaw, PLAYER_SPEED, delta)
-        if (mobileJump) camera.position.y = Math.min(camera.position.y + PLAYER_SPEED * delta, 30)
-      } else {
-        move = computeMovement(keyboard, yaw, PLAYER_SPEED, delta)
-        if (keyboard.isDown(KEYS.JUMP)) camera.position.y = Math.min(camera.position.y + PLAYER_SPEED * delta, 30)
-      }
+      // Horizontal movement
+      const move = isMobile
+        ? computeMovementAxes(joystickDx, joystickDz, yaw, PLAYER_SPEED, delta)
+        : computeMovement(keyboard, yaw, PLAYER_SPEED, delta)
       camera.position.x += move.x
       camera.position.z += move.z
+
+      // Vertical physics
+      velocityY = applyGravity(velocityY, delta)
+
+      const wantsJump    = isMobile ? mobileJump    : keyboard.isDown(KEYS.JUMP)
+      const wantsDescend = isMobile ? mobileDescend : keyboard.isDown(KEYS.DESCEND)
+      if (wantsJump)    velocityY = applyJump(velocityY, isGrounded)
+      if (wantsDescend) velocityY = applyDescend(velocityY)
+
+      camera.position.y += velocityY * delta
+      camera.position.y  = Math.max(camera.position.y, -5) // void floor
+
+      const groundY  = worldManager.getGroundY(camera.position.x, camera.position.z)
+      const resolved = resolveGround(camera.position.y, velocityY, groundY)
+      camera.position.y = resolved.posY
+      velocityY  = resolved.velocityY
+      isGrounded = resolved.isGrounded
 
       renderer.render(scene, camera)
       requestAnimationFrame(loop)
@@ -258,14 +271,12 @@
     <p>{isMobile ? 'Tap to play' : 'Click or press Esc to play'}</p>
     <ul>
       {#if isMobile}
-        <li>Left thumb — move</li>
-        <li>Right thumb drag — look</li>
-        <li>⬆ — fly up &nbsp; ⛏ — break &nbsp; + — place</li>
+        <li>Left thumb — move &nbsp; Right thumb — look</li>
+        <li>⬆ jump &nbsp; ⬇ descend &nbsp; ⛏ break &nbsp; + place</li>
         <li>◀ ▶ — cycle blocks</li>
       {:else}
         <li><kbd>WASD</kbd> / Arrows — move</li>
-        <li>Mouse — look around</li>
-        <li><kbd>Space</kbd> — fly up</li>
+        <li>Mouse — look &nbsp; <kbd>Space</kbd> — jump &nbsp; <kbd>Shift</kbd> — descend</li>
         <li><kbd>LMB</kbd> — break &nbsp; <kbd>RMB</kbd> — place</li>
         <li><kbd>1–9</kbd> / Scroll / <kbd>Q</kbd><kbd>E</kbd> — select block</li>
         <li><kbd>Esc</kbd> — pause</li>
@@ -279,13 +290,12 @@
 
   <div class="hotbar">
     {#each HOTBAR as item, i}
+      <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
       <div
         class="hotbar-slot"
         class:selected={i === selectedSlot}
         style="background:{slotColor(i)}"
         title="{i + 1}: {item.label}"
-        role="button"
-        tabindex="-1"
         onclick={() => { selectedSlot = i }}
       >
         <span class="slot-num">{i + 1}</span>
@@ -294,7 +304,6 @@
   </div>
 
   {#if isMobile}
-    <!-- Joystick visual -->
     {#if joystickAnchor}
       <div class="joy-base" style="left:{joystickAnchor.x}px; top:{joystickAnchor.y}px;"></div>
       {#if joystickThumb}
@@ -302,34 +311,27 @@
       {/if}
     {/if}
 
-    <!-- Action buttons -->
     <div class="mob-actions">
-      <button
-        class="mob-btn"
+      <button class="mob-btn"
         ontouchstart={(e) => { e.stopPropagation(); mobileJump = true }}
-        ontouchend={(e) => { e.stopPropagation(); mobileJump = false }}
-        aria-label="Jump"
-      >⬆</button>
-      <button
-        class="mob-btn"
+        ontouchend={(e)   => { e.stopPropagation(); mobileJump = false }}
+        aria-label="Jump">⬆</button>
+      <button class="mob-btn"
+        ontouchstart={(e) => { e.stopPropagation(); mobileDescend = true }}
+        ontouchend={(e)   => { e.stopPropagation(); mobileDescend = false }}
+        aria-label="Descend">⬇</button>
+      <button class="mob-btn"
         ontouchstart={(e) => { e.preventDefault(); e.stopPropagation(); _breakBlock() }}
-        aria-label="Break block"
-      >⛏</button>
-      <button
-        class="mob-btn"
+        aria-label="Break block">⛏</button>
+      <button class="mob-btn"
         ontouchstart={(e) => { e.preventDefault(); e.stopPropagation(); _placeBlock() }}
-        aria-label="Place block"
-      >+</button>
-      <button
-        class="mob-btn small"
+        aria-label="Place block">+</button>
+      <button class="mob-btn small"
         ontouchstart={(e) => { e.stopPropagation(); selectedSlot = (selectedSlot - 1 + HOTBAR.length) % HOTBAR.length }}
-        aria-label="Previous block"
-      >◀</button>
-      <button
-        class="mob-btn small"
+        aria-label="Previous block">◀</button>
+      <button class="mob-btn small"
         ontouchstart={(e) => { e.stopPropagation(); selectedSlot = (selectedSlot + 1) % HOTBAR.length }}
-        aria-label="Next block"
-      >▶</button>
+        aria-label="Next block">▶</button>
     </div>
   {/if}
 {/if}
@@ -352,7 +354,6 @@
     touch-action: none;
   }
 
-  /* ── Overlay ── */
   .overlay {
     position: fixed;
     inset: 0;
@@ -402,7 +403,6 @@
     50% { opacity: 0.45; }
   }
 
-  /* ── Crosshair ── */
   .crosshair {
     position: fixed;
     top: 50%;
@@ -416,7 +416,6 @@
     user-select: none;
   }
 
-  /* ── Hotbar ── */
   .hotbar {
     position: fixed;
     bottom: 16px;
@@ -452,11 +451,10 @@
     text-shadow: 1px 1px 0 #000;
   }
 
-  /* ── Mobile joystick ── */
   .joy-base {
     position: fixed;
-    width: calc(var(--jr, 60px) * 2);
-    height: calc(var(--jr, 60px) * 2);
+    width: calc(2 * 60px);
+    height: calc(2 * 60px);
     border-radius: 50%;
     border: 2px solid rgba(255, 255, 255, 0.35);
     background: rgba(255, 255, 255, 0.08);
@@ -475,25 +473,24 @@
     pointer-events: none;
   }
 
-  /* ── Mobile action buttons ── */
   .mob-actions {
     position: fixed;
     bottom: 72px;
     right: 16px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
     align-items: center;
   }
 
   .mob-btn {
-    width: 60px;
-    height: 60px;
+    width: 58px;
+    height: 58px;
     border-radius: 50%;
     background: rgba(0, 0, 0, 0.55);
     border: 2px solid rgba(255, 255, 255, 0.45);
     color: #fff;
-    font-size: 1.5rem;
+    font-size: 1.4rem;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -503,9 +500,9 @@
   }
 
   .mob-btn.small {
-    width: 48px;
-    height: 48px;
-    font-size: 1.1rem;
+    width: 46px;
+    height: 46px;
+    font-size: 1rem;
   }
 
   .mob-btn:active {

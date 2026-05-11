@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { generateWorld, makeBlockMesh, BlockType } from './world.js'
+import { buildColMap, getGroundY as _getGroundY } from './physics.js'
 
 export function createRenderer(canvas) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
@@ -33,8 +34,11 @@ export function createRenderer(canvas) {
   return { renderer, scene, camera, resize, worldManager }
 }
 
+const isSolid = (b) => b.type !== BlockType.WATER && b.type !== BlockType.AIR
+
 export function createWorldManager(scene, initialBlocks) {
   const meshMap = new Map()
+  let colMap = buildColMap(initialBlocks.filter(isSolid))
 
   for (const block of initialBlocks) {
     const mesh = makeBlockMesh(block)
@@ -42,8 +46,23 @@ export function createWorldManager(scene, initialBlocks) {
     scene.add(mesh)
   }
 
+  function colKey(b) { return `${b.x},${b.z}` }
+
+  function rebuildColumn(bx, bz) {
+    let max = -Infinity
+    for (const [, mesh] of meshMap) {
+      const b = mesh.userData.block
+      if (b.x === bx && b.z === bz && isSolid(b)) max = Math.max(max, b.y)
+    }
+    const k = `${bx},${bz}`
+    if (max === -Infinity) colMap.delete(k)
+    else colMap.set(k, max)
+  }
+
   return {
     getMeshes() { return [...meshMap.values()] },
+
+    getGroundY(px, pz) { return _getGroundY(px, pz, colMap) },
 
     addBlock(block) {
       const k = posKey(block)
@@ -51,6 +70,10 @@ export function createWorldManager(scene, initialBlocks) {
       const mesh = makeBlockMesh(block)
       meshMap.set(k, mesh)
       scene.add(mesh)
+      if (isSolid(block)) {
+        const cur = colMap.get(colKey(block)) ?? -Infinity
+        if (block.y > cur) colMap.set(colKey(block), block.y)
+      }
     },
 
     removeBlock(pos) {
@@ -61,6 +84,7 @@ export function createWorldManager(scene, initialBlocks) {
       mesh.geometry.dispose()
       mesh.material.dispose()
       meshMap.delete(k)
+      if (isSolid(pos)) rebuildColumn(pos.x, pos.z)
     },
   }
 }
