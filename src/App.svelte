@@ -22,6 +22,8 @@
 
   let showNostr = false
   let passphraseInput
+  let fileInput
+  let uploadStatus = ''
   let passphrase = ''
   let privkey = ''
   let pubkey = ''
@@ -100,6 +102,25 @@
     })
     a.click()
     URL.revokeObjectURL(a.href)
+  }
+
+  async function handleFileUpload(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    uploadStatus = 'loading'
+    try {
+      const text = await file.text()
+      const blocks = await decodeBlocks(text)
+      worldManager.loadBlocks(blocks)
+      resetCamera()
+      uploadStatus = ''
+      e.target.value = ''
+      closeNostr()
+    } catch {
+      uploadStatus = 'error'
+      e.target.value = ''
+      setTimeout(() => { uploadStatus = '' }, 3000)
+    }
   }
   let selectedSlot = 0
   let isMobile = false
@@ -532,6 +553,13 @@
         placeholder="Your secret passphrase"
         autocomplete="off"
       />
+      <input
+        type="file"
+        accept=".json"
+        style="display:none"
+        bind:this={fileInput}
+        onchange={handleFileUpload}
+      />
       {#if pubkey}
         <div class="pubkey-hint">key: {pubkey.slice(0, 16)}…</div>
         <button onclick={saveMap} disabled={saveStatus === 'saving'} class="action-btn">
@@ -540,6 +568,11 @@
       {:else}
         <div class="pubkey-hint">Enter passphrase to enable saving</div>
       {/if}
+      <button
+        onclick={() => fileInput.click()}
+        disabled={uploadStatus === 'loading'}
+        class="action-btn secondary"
+      >{uploadStatus === 'loading' ? 'Loading…' : uploadStatus === 'error' ? '✗ Invalid file' : '📂 Import map file'}</button>
 
       <div class="maps-section">
         <div class="maps-section-header">
@@ -878,6 +911,13 @@
   }
   .action-btn:hover:not(:disabled) { background: rgba(0, 255, 68, 0.22); }
   .action-btn:disabled { opacity: 0.45; cursor: default; }
+  .action-btn.secondary {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.2);
+    color: #aaa;
+    margin-top: 4px;
+  }
+  .action-btn.secondary:hover:not(:disabled) { background: rgba(255, 255, 255, 0.1); color: #fff; }
 
   .maps-section {
     margin-top: 6px;
