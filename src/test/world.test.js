@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { generateTerrain, BlockType, CHUNK_SIZE } from '../game/world.js'
+import { generateTerrain, generateWorld, BlockType, CHUNK_SIZE } from '../game/world.js'
 
 describe('generateTerrain', () => {
   it('returns blocks covering the full chunk footprint', () => {
@@ -39,5 +39,43 @@ describe('generateTerrain', () => {
   it('contains no AIR blocks (they are omitted)', () => {
     const blocks = generateTerrain(0, 0)
     expect(blocks.every((b) => b.type !== BlockType.AIR)).toBe(true)
+  })
+})
+
+describe('generateWorld', () => {
+  it('returns at least 1000 blocks', () => {
+    const blocks = generateWorld()
+    expect(blocks.length).toBeGreaterThanOrEqual(1000)
+  })
+
+  it('has no duplicate block positions', () => {
+    const blocks = generateWorld()
+    const keys = blocks.map((b) => `${b.x},${b.y},${b.z}`)
+    expect(new Set(keys).size).toBe(keys.length)
+  })
+
+  it('contains desert sand blocks', () => {
+    const blocks = generateWorld()
+    expect(blocks.some((b) => b.type === BlockType.SAND)).toBe(true)
+  })
+
+  it('contains ocean water blocks', () => {
+    const blocks = generateWorld()
+    expect(blocks.some((b) => b.type === BlockType.WATER)).toBe(true)
+  })
+
+  it('contains forest wood blocks', () => {
+    const blocks = generateWorld()
+    expect(blocks.some((b) => b.type === BlockType.WOOD)).toBe(true)
+  })
+
+  it('contains city stone-brick blocks', () => {
+    const blocks = generateWorld()
+    expect(blocks.some((b) => b.type === BlockType.STONE_BRICK)).toBe(true)
+  })
+
+  it('all blocks have integer coordinates', () => {
+    const blocks = generateWorld()
+    expect(blocks.every((b) => Number.isInteger(b.x) && Number.isInteger(b.y) && Number.isInteger(b.z))).toBe(true)
   })
 })

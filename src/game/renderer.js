@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { generateTerrain, buildChunkMesh } from './world.js'
+import { generateWorld, makeBlockMesh, BlockType } from './world.js'
 
 export function createRenderer(canvas) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
@@ -8,22 +8,19 @@ export function createRenderer(canvas) {
 
   const scene = new THREE.Scene()
   scene.background = new THREE.Color(0x87ceeb)
-  scene.fog = new THREE.Fog(0x87ceeb, 20, 60)
+  scene.fog = new THREE.Fog(0x87ceeb, 30, 80)
 
   const camera = new THREE.PerspectiveCamera(75, canvas.clientWidth / canvas.clientHeight, 0.1, 100)
-  camera.position.set(8, 6, 8)
+  camera.position.set(16, 12, 16)
   camera.rotation.order = 'YXZ'
 
   const ambient = new THREE.AmbientLight(0xffffff, 0.6)
   scene.add(ambient)
-
   const sun = new THREE.DirectionalLight(0xffffff, 0.8)
-  sun.position.set(10, 20, 10)
+  sun.position.set(20, 40, 20)
   scene.add(sun)
 
-  const blocks = generateTerrain(0, 0)
-  const meshes = buildChunkMesh(blocks)
-  meshes.forEach((m) => scene.add(m))
+  const worldManager = createWorldManager(scene, generateWorld())
 
   function resize() {
     const w = canvas.clientWidth
@@ -33,5 +30,39 @@ export function createRenderer(canvas) {
     camera.updateProjectionMatrix()
   }
 
-  return { renderer, scene, camera, resize }
+  return { renderer, scene, camera, resize, worldManager }
 }
+
+export function createWorldManager(scene, initialBlocks) {
+  const meshMap = new Map()
+
+  for (const block of initialBlocks) {
+    const mesh = makeBlockMesh(block)
+    meshMap.set(posKey(block), mesh)
+    scene.add(mesh)
+  }
+
+  return {
+    getMeshes() { return [...meshMap.values()] },
+
+    addBlock(block) {
+      const k = posKey(block)
+      if (meshMap.has(k)) return
+      const mesh = makeBlockMesh(block)
+      meshMap.set(k, mesh)
+      scene.add(mesh)
+    },
+
+    removeBlock(pos) {
+      const k = posKey(pos)
+      const mesh = meshMap.get(k)
+      if (!mesh) return
+      scene.remove(mesh)
+      mesh.geometry.dispose()
+      mesh.material.dispose()
+      meshMap.delete(k)
+    },
+  }
+}
+
+function posKey(b) { return `${b.x},${b.y},${b.z}` }
