@@ -1,7 +1,7 @@
 # Nostr Map Format
 
 **Protocol**: Nostr kind `30078`, d-tag `pufferfishgames/nukecraft`, NIP-13 PoW difficulty 8.  
-**Relay**: `wss://relay.damus.io` (+ nos.lol, relay.nostr.band as fallback).  
+**Relay**: `wss://nos.lol` (primary; damus.io + relay.nostr.band as fallback).  
 **Identity**: passphrase → SHA256 → secp256k1 private key → public key (BIP-340 x-only).  
 **Replaceable**: same pubkey + d-tag = one canonical map per user (cross-device sync).
 

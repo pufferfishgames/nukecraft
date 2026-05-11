@@ -13,7 +13,7 @@
   import { publishMap, fetchMaps } from './nostr/relay.js'
   import { decodeBlocks } from './nostr/codec.js'
 
-  const RELAY_URL = 'wss://relay.damus.io'
+  const RELAY_URL = 'wss://nos.lol'
 
   let canvas
   let overlay = true

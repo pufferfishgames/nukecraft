@@ -9,8 +9,8 @@ import { encodeBlocks } from '../src/nostr/codec.js'
 
 const PASSPHRASE = 'maya'
 const RELAYS = [
-  'wss://relay.damus.io',
   'wss://nos.lol',
+  'wss://relay.damus.io',
   'wss://relay.nostr.band',
 ]
 
