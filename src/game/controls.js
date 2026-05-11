@@ -16,24 +16,20 @@ export function createKeyboardState() {
   }
 }
 
-export function computeMovement(keyboard, yaw, speed, delta) {
-  const forward = keyboard.isDown(KEYS.FORWARD)
-  const backward = keyboard.isDown(KEYS.BACKWARD)
-  const left = keyboard.isDown(KEYS.LEFT)
-  const right = keyboard.isDown(KEYS.RIGHT)
-
-  const dx =
-    (right ? 1 : 0) - (left ? 1 : 0)
-  const dz =
-    (backward ? 1 : 0) - (forward ? 1 : 0)
-
+// Core movement math — accepts continuous axes (-1..1) from keyboard or joystick.
+// dx: right=+1, left=-1  |  dz: backward=+1, forward=-1
+// camera forward = (-sinY, 0, -cosY), camera right = (cosY, 0, -sinY)
+export function computeMovementAxes(dx, dz, yaw, speed, delta) {
   const sinY = Math.sin(yaw)
   const cosY = Math.cos(yaw)
-
-  // camera forward = (-sinY, 0, -cosY), camera right = (cosY, 0, -sinY)
-  // move = -dz * forward + dx * right  (dz is -1 when W pressed)
   return {
     x: (dx * cosY + dz * sinY) * speed * delta,
     z: (-dx * sinY + dz * cosY) * speed * delta,
   }
+}
+
+export function computeMovement(keyboard, yaw, speed, delta) {
+  const dx = (keyboard.isDown(KEYS.RIGHT) ? 1 : 0) - (keyboard.isDown(KEYS.LEFT) ? 1 : 0)
+  const dz = (keyboard.isDown(KEYS.BACKWARD) ? 1 : 0) - (keyboard.isDown(KEYS.FORWARD) ? 1 : 0)
+  return computeMovementAxes(dx, dz, yaw, speed, delta)
 }

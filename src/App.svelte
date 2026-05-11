@@ -2,13 +2,14 @@
   import { onMount } from 'svelte'
   import * as THREE from 'three'
   import { createRenderer } from './game/renderer.js'
-  import { createKeyboardState, computeMovement, KEYS } from './game/controls.js'
+  import { createKeyboardState, computeMovement, computeMovementAxes, KEYS } from './game/controls.js'
+  import { joystickAxes, touchLookDelta, JOYSTICK_RADIUS, TOUCH_SENSITIVITY } from './game/touch.js'
   import { BlockType, BLOCK_COLORS } from './game/world.js'
 
   let canvas
   let overlay = true
   let selectedSlot = 0
-  let animId
+  let isMobile = false
 
   const PLAYER_SPEED = 5
   const MOUSE_SENSITIVITY = 0.002
@@ -31,30 +32,94 @@
     return '#' + hex.toString(16).padStart(6, '0')
   }
 
-  // Called from overlay click OR Esc keydown — both fire from user gestures
+  // ── Mobile joystick state ──────────────────────────────────────────────────
+  let joystickTouchId = null
+  let joystickAnchor = null   // { x, y } — where touch started
+  let joystickPos    = null   // { x, y } — current touch
+  let joystickDx = 0
+  let joystickDz = 0
+
+  // ── Mobile look state ──────────────────────────────────────────────────────
+  let lookTouchId = null
+  let lookLastX = 0
+  let lookLastY = 0
+
+  // ── Mobile action state ────────────────────────────────────────────────────
+  let mobileJump = false
+
+  // Computed thumb position clamped to joystick circle
+  $: joystickThumb = (() => {
+    if (!joystickAnchor || !joystickPos) return null
+    const dx = joystickPos.x - joystickAnchor.x
+    const dz = joystickPos.y - joystickAnchor.y
+    const len = Math.sqrt(dx * dx + dz * dz)
+    if (len <= JOYSTICK_RADIUS) return joystickPos
+    return {
+      x: joystickAnchor.x + (dx / len) * JOYSTICK_RADIUS,
+      y: joystickAnchor.y + (dz / len) * JOYSTICK_RADIUS,
+    }
+  })()
+
+  // ── Break / place (called from both mobile buttons and desktop clicks) ─────
+  let _breakBlock = () => {}
+  let _placeBlock = () => {}
+
   function startGame() {
     overlay = false
-    canvas?.requestPointerLock()
+    if (!isMobile) canvas?.requestPointerLock()
   }
 
   onMount(() => {
+    isMobile = window.matchMedia('(pointer: coarse)').matches
+
     const { renderer, scene, camera, resize, worldManager } = createRenderer(canvas)
     resize()
     window.addEventListener('resize', resize)
 
-    // Show overlay again whenever pointer lock exits (browser Esc while playing)
     document.addEventListener('pointerlockchange', () => {
       if (document.pointerLockElement !== canvas) overlay = true
     })
 
+    // ── Shared raycast helpers ───────────────────────────────────────────────
+    let yaw = Math.PI * 1.25
+    let pitch = -0.3
+    camera.rotation.y = yaw
+    camera.rotation.x = pitch
+
+    function raycastTarget() {
+      const raycaster = new THREE.Raycaster()
+      raycaster.setFromCamera({ x: 0, y: 0 }, camera)
+      raycaster.far = REACH
+      const hits = raycaster.intersectObjects(worldManager.getMeshes())
+      return hits.length ? hits[0] : null
+    }
+
+    _breakBlock = () => {
+      const hit = raycastTarget()
+      if (!hit) return
+      const block = hit.object.userData.block
+      if (block.type === BlockType.WATER) return
+      worldManager.removeBlock(block)
+    }
+
+    _placeBlock = () => {
+      const hit = raycastTarget()
+      if (!hit) return
+      const block = hit.object.userData.block
+      const n = hit.face.normal
+      worldManager.addBlock({
+        x: block.x + Math.round(n.x),
+        y: block.y + Math.round(n.y),
+        z: block.z + Math.round(n.z),
+        type: HOTBAR[selectedSlot].type,
+      })
+    }
+
+    // ── Desktop keyboard ─────────────────────────────────────────────────────
     const keyboard = createKeyboardState()
 
     function onKeyDown(e) {
-      // Esc while overlay is showing → start game
-      if (e.code === 'Escape' && overlay) {
-        startGame()
-        return
-      }
+      if (e.code === 'Escape' && overlay) { startGame(); return }
       keyboard.onKeyDown(e)
       if (e.code.startsWith('Digit')) {
         const n = parseInt(e.code[5]) - 1
@@ -66,11 +131,7 @@
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', keyboard.onKeyUp)
 
-    let yaw = Math.PI * 1.25
-    let pitch = -0.3
-    camera.rotation.y = yaw
-    camera.rotation.x = pitch
-
+    // ── Desktop mouse look ───────────────────────────────────────────────────
     document.addEventListener('mousemove', (e) => {
       if (document.pointerLockElement !== canvas) return
       yaw -= e.movementX * MOUSE_SENSITIVITY
@@ -80,61 +141,101 @@
       camera.rotation.x = pitch
     })
 
-    function raycastTarget() {
-      const raycaster = new THREE.Raycaster()
-      raycaster.setFromCamera({ x: 0, y: 0 }, camera)
-      raycaster.far = REACH
-      const hits = raycaster.intersectObjects(worldManager.getMeshes())
-      return hits.length ? hits[0] : null
-    }
-
-    // Canvas click = break block (overlay is never visible when this fires)
+    // ── Desktop clicks ───────────────────────────────────────────────────────
     canvas.addEventListener('click', () => {
       if (document.pointerLockElement !== canvas) return
-      const hit = raycastTarget()
-      if (!hit) return
-      const block = hit.object.userData.block
-      if (block.type === BlockType.WATER) return
-      worldManager.removeBlock(block)
+      _breakBlock()
     })
-
     canvas.addEventListener('contextmenu', (e) => {
       e.preventDefault()
       if (document.pointerLockElement !== canvas) return
-      const hit = raycastTarget()
-      if (!hit) return
-      const block = hit.object.userData.block
-      const n = hit.face.normal
-      worldManager.addBlock({
-        x: block.x + Math.round(n.x),
-        y: block.y + Math.round(n.y),
-        z: block.z + Math.round(n.z),
-        type: HOTBAR[selectedSlot].type,
-      })
+      _placeBlock()
     })
-
     canvas.addEventListener('wheel', (e) => {
       if (document.pointerLockElement !== canvas) return
       selectedSlot = (selectedSlot + (e.deltaY > 0 ? 1 : -1) + HOTBAR.length) % HOTBAR.length
     })
 
+    // ── Mobile touch ─────────────────────────────────────────────────────────
+    function onTouchStart(e) {
+      e.preventDefault()
+      for (const t of e.changedTouches) {
+        const leftZone = t.clientX < window.innerWidth * 0.45
+        if (leftZone && joystickTouchId === null) {
+          joystickTouchId = t.identifier
+          joystickAnchor = { x: t.clientX, y: t.clientY }
+          joystickPos    = { x: t.clientX, y: t.clientY }
+          joystickDx = joystickDz = 0
+        } else if (!leftZone && lookTouchId === null) {
+          lookTouchId = t.identifier
+          lookLastX = t.clientX
+          lookLastY = t.clientY
+        }
+      }
+    }
+
+    function onTouchMove(e) {
+      e.preventDefault()
+      for (const t of e.changedTouches) {
+        if (t.identifier === joystickTouchId && joystickAnchor) {
+          joystickPos = { x: t.clientX, y: t.clientY }
+          const axes = joystickAxes(t.clientX, t.clientY, joystickAnchor.x, joystickAnchor.y, JOYSTICK_RADIUS)
+          joystickDx = axes.dx
+          joystickDz = axes.dz
+        }
+        if (t.identifier === lookTouchId) {
+          const { dyaw, dpitch } = touchLookDelta(t.clientX - lookLastX, t.clientY - lookLastY, TOUCH_SENSITIVITY)
+          yaw += dyaw
+          pitch += dpitch
+          pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, pitch))
+          camera.rotation.y = yaw
+          camera.rotation.x = pitch
+          lookLastX = t.clientX
+          lookLastY = t.clientY
+        }
+      }
+    }
+
+    function onTouchEnd(e) {
+      for (const t of e.changedTouches) {
+        if (t.identifier === joystickTouchId) {
+          joystickTouchId = null
+          joystickAnchor  = null
+          joystickPos     = null
+          joystickDx = joystickDz = 0
+        }
+        if (t.identifier === lookTouchId) lookTouchId = null
+      }
+    }
+
+    canvas.addEventListener('touchstart',  onTouchStart,  { passive: false })
+    canvas.addEventListener('touchmove',   onTouchMove,   { passive: false })
+    canvas.addEventListener('touchend',    onTouchEnd)
+    canvas.addEventListener('touchcancel', onTouchEnd)
+
+    // ── Game loop ────────────────────────────────────────────────────────────
     let last = performance.now()
     function loop(now) {
       const delta = Math.min((now - last) / 1000, 0.1)
       last = now
-      const move = computeMovement(keyboard, yaw, PLAYER_SPEED, delta)
+
+      let move
+      if (isMobile) {
+        move = computeMovementAxes(joystickDx, joystickDz, yaw, PLAYER_SPEED, delta)
+        if (mobileJump) camera.position.y = Math.min(camera.position.y + PLAYER_SPEED * delta, 30)
+      } else {
+        move = computeMovement(keyboard, yaw, PLAYER_SPEED, delta)
+        if (keyboard.isDown(KEYS.JUMP)) camera.position.y = Math.min(camera.position.y + PLAYER_SPEED * delta, 30)
+      }
       camera.position.x += move.x
       camera.position.z += move.z
-      if (keyboard.isDown(KEYS.JUMP)) {
-        camera.position.y = Math.min(camera.position.y + PLAYER_SPEED * delta, 30)
-      }
+
       renderer.render(scene, camera)
-      animId = requestAnimationFrame(loop)
+      requestAnimationFrame(loop)
     }
-    animId = requestAnimationFrame(loop)
+    requestAnimationFrame(loop)
 
     return () => {
-      cancelAnimationFrame(animId)
       window.removeEventListener('resize', resize)
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', keyboard.onKeyUp)
@@ -143,27 +244,38 @@
   })
 </script>
 
-<canvas bind:this={canvas} class="game-canvas" aria-label="Nikolai's Minecraft"></canvas>
+<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+<canvas
+  bind:this={canvas}
+  class="game-canvas"
+  aria-label="Nikolai's Minecraft"
+></canvas>
 
 {#if overlay}
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
   <div class="overlay" data-testid="overlay" onclick={startGame}>
     <h1>Nikolai's Minecraft</h1>
-    <p>Click or press Esc to play</p>
+    <p>{isMobile ? 'Tap to play' : 'Click or press Esc to play'}</p>
     <ul>
-      <li><kbd>WASD</kbd> / Arrows — move</li>
-      <li>Mouse — look around</li>
-      <li><kbd>Space</kbd> — fly up</li>
-      <li><kbd>LMB</kbd> — break block</li>
-      <li><kbd>RMB</kbd> — place block</li>
-      <li><kbd>1–9</kbd> / Scroll / <kbd>Q</kbd><kbd>E</kbd> — select block</li>
-      <li><kbd>Esc</kbd> — pause</li>
+      {#if isMobile}
+        <li>Left thumb — move</li>
+        <li>Right thumb drag — look</li>
+        <li>⬆ — fly up &nbsp; ⛏ — break &nbsp; + — place</li>
+        <li>◀ ▶ — cycle blocks</li>
+      {:else}
+        <li><kbd>WASD</kbd> / Arrows — move</li>
+        <li>Mouse — look around</li>
+        <li><kbd>Space</kbd> — fly up</li>
+        <li><kbd>LMB</kbd> — break &nbsp; <kbd>RMB</kbd> — place</li>
+        <li><kbd>1–9</kbd> / Scroll / <kbd>Q</kbd><kbd>E</kbd> — select block</li>
+        <li><kbd>Esc</kbd> — pause</li>
+      {/if}
     </ul>
   </div>
 {/if}
 
 {#if !overlay}
-  <div class="crosshair">+</div>
+  <div class="crosshair" aria-hidden="true">+</div>
 
   <div class="hotbar">
     {#each HOTBAR as item, i}
@@ -172,11 +284,54 @@
         class:selected={i === selectedSlot}
         style="background:{slotColor(i)}"
         title="{i + 1}: {item.label}"
+        role="button"
+        tabindex="-1"
+        onclick={() => { selectedSlot = i }}
       >
         <span class="slot-num">{i + 1}</span>
       </div>
     {/each}
   </div>
+
+  {#if isMobile}
+    <!-- Joystick visual -->
+    {#if joystickAnchor}
+      <div class="joy-base" style="left:{joystickAnchor.x}px; top:{joystickAnchor.y}px;"></div>
+      {#if joystickThumb}
+        <div class="joy-thumb" style="left:{joystickThumb.x}px; top:{joystickThumb.y}px;"></div>
+      {/if}
+    {/if}
+
+    <!-- Action buttons -->
+    <div class="mob-actions">
+      <button
+        class="mob-btn"
+        ontouchstart={(e) => { e.stopPropagation(); mobileJump = true }}
+        ontouchend={(e) => { e.stopPropagation(); mobileJump = false }}
+        aria-label="Jump"
+      >⬆</button>
+      <button
+        class="mob-btn"
+        ontouchstart={(e) => { e.preventDefault(); e.stopPropagation(); _breakBlock() }}
+        aria-label="Break block"
+      >⛏</button>
+      <button
+        class="mob-btn"
+        ontouchstart={(e) => { e.preventDefault(); e.stopPropagation(); _placeBlock() }}
+        aria-label="Place block"
+      >+</button>
+      <button
+        class="mob-btn small"
+        ontouchstart={(e) => { e.stopPropagation(); selectedSlot = (selectedSlot - 1 + HOTBAR.length) % HOTBAR.length }}
+        aria-label="Previous block"
+      >◀</button>
+      <button
+        class="mob-btn small"
+        ontouchstart={(e) => { e.stopPropagation(); selectedSlot = (selectedSlot + 1) % HOTBAR.length }}
+        aria-label="Next block"
+      >▶</button>
+    </div>
+  {/if}
 {/if}
 
 <style>
@@ -187,12 +342,14 @@
     background: #000;
     font-family: monospace;
     cursor: none;
+    touch-action: none;
   }
 
   .game-canvas {
     display: block;
     width: 100vw;
     height: 100vh;
+    touch-action: none;
   }
 
   /* ── Overlay ── */
@@ -210,14 +367,14 @@
   }
 
   .overlay h1 {
-    font-size: 3rem;
+    font-size: clamp(1.8rem, 6vw, 3rem);
     margin: 0 0 0.75rem;
     text-shadow: 2px 2px 0 #000;
     letter-spacing: 0.05em;
   }
 
   .overlay p {
-    font-size: 1.4rem;
+    font-size: clamp(1rem, 3.5vw, 1.4rem);
     margin: 0 0 1.5rem;
     animation: pulse 1.5s ease-in-out infinite;
   }
@@ -225,9 +382,10 @@
   .overlay ul {
     list-style: none;
     padding: 0;
-    font-size: 0.95rem;
+    font-size: clamp(0.75rem, 2.5vw, 0.95rem);
     color: #ccc;
-    line-height: 2;
+    line-height: 2.2;
+    text-align: center;
   }
 
   kbd {
@@ -270,12 +428,14 @@
   }
 
   .hotbar-slot {
-    width: 48px;
-    height: 48px;
+    width: 44px;
+    height: 44px;
     border: 2px solid rgba(255, 255, 255, 0.35);
     border-radius: 4px;
     position: relative;
     box-shadow: inset 0 0 6px rgba(0, 0, 0, 0.4);
+    pointer-events: auto;
+    cursor: pointer;
   }
 
   .hotbar-slot.selected {
@@ -287,8 +447,68 @@
     position: absolute;
     bottom: 2px;
     right: 4px;
-    font-size: 0.65rem;
+    font-size: 0.6rem;
     color: rgba(255, 255, 255, 0.8);
     text-shadow: 1px 1px 0 #000;
+  }
+
+  /* ── Mobile joystick ── */
+  .joy-base {
+    position: fixed;
+    width: calc(var(--jr, 60px) * 2);
+    height: calc(var(--jr, 60px) * 2);
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.35);
+    background: rgba(255, 255, 255, 0.08);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+  }
+
+  .joy-thumb {
+    position: fixed;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.55);
+    border: 2px solid rgba(255, 255, 255, 0.8);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+  }
+
+  /* ── Mobile action buttons ── */
+  .mob-actions {
+    position: fixed;
+    bottom: 72px;
+    right: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .mob-btn {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.55);
+    border: 2px solid rgba(255, 255, 255, 0.45);
+    color: #fff;
+    font-size: 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    touch-action: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mob-btn.small {
+    width: 48px;
+    height: 48px;
+    font-size: 1.1rem;
+  }
+
+  .mob-btn:active {
+    background: rgba(255, 255, 255, 0.25);
   }
 </style>
