@@ -1,18 +1,22 @@
 import * as THREE from 'three'
 import { generateWorld, BlockType, BLOCK_COLORS, BLOCK_SIZE } from './world.js'
 import { buildColMap, getGroundY as _getGroundY } from './physics.js'
+import { nukeGlowIntensity } from './nuke.js'
 
 function makeBlockMesh(block) {
   const geometry = new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE)
   const material = new THREE.MeshLambertMaterial({
     color: BLOCK_COLORS[block.type] ?? 0xffffff,
     ...(block.type === BlockType.WATER ? { transparent: true, opacity: 0.65 } : {}),
+    ...(block.type === BlockType.NUKE  ? { emissive: 0x00ff44, emissiveIntensity: 0.7 } : {}),
   })
   const mesh = new THREE.Mesh(geometry, material)
   mesh.position.set(block.x, block.y, block.z)
   mesh.userData.block = block
   return mesh
 }
+
+const FACE_OFFSETS = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]]
 
 export function createRenderer(canvas) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
@@ -50,11 +54,13 @@ const isSolid = (b) => b.type !== BlockType.WATER && b.type !== BlockType.AIR
 
 export function createWorldManager(scene, initialBlocks) {
   const meshMap = new Map()
+  const nukeMeshes = new Set()
   let colMap = buildColMap(initialBlocks.filter(isSolid))
 
   for (const block of initialBlocks) {
     const mesh = makeBlockMesh(block)
     meshMap.set(posKey(block), mesh)
+    if (block.type === BlockType.NUKE) nukeMeshes.add(mesh)
     scene.add(mesh)
   }
 
@@ -71,16 +77,51 @@ export function createWorldManager(scene, initialBlocks) {
     else colMap.set(k, max)
   }
 
+  function countNukeNeighbors(bx, by, bz) {
+    let n = 0
+    for (const [dx, dy, dz] of FACE_OFFSETS) {
+      const m = meshMap.get(posKey({ x: bx+dx, y: by+dy, z: bz+dz }))
+      if (m?.userData.block?.type === BlockType.NUKE) n++
+    }
+    return n
+  }
+
+  function updateNeighborGlow(bx, by, bz) {
+    for (const [dx, dy, dz] of FACE_OFFSETS) {
+      const mesh = meshMap.get(posKey({ x: bx+dx, y: by+dy, z: bz+dz }))
+      if (!mesh || mesh.userData.block.type === BlockType.NUKE) continue
+      const count = countNukeNeighbors(bx+dx, by+dy, bz+dz)
+      mesh.material.emissive.setHex(0x00ff44)
+      mesh.material.emissiveIntensity = nukeGlowIntensity(count)
+    }
+  }
+
   return {
     getMeshes() { return [...meshMap.values()] },
 
     getGroundY(px, pz) { return _getGroundY(px, pz, colMap) },
+
+    hasNukeAt(x, y, z) {
+      return meshMap.get(posKey({ x, y, z }))?.userData.block?.type === BlockType.NUKE
+    },
+
+    animateNukeBlocks(time) {
+      for (const mesh of nukeMeshes) {
+        const { x, z } = mesh.position
+        const pulse = 0.5 + 0.5 * Math.sin(time * 3 + x * 0.7 + z * 0.9)
+        mesh.material.emissiveIntensity = 0.3 + pulse * 0.7
+      }
+    },
 
     addBlock(block) {
       const k = posKey(block)
       if (meshMap.has(k)) return
       const mesh = makeBlockMesh(block)
       meshMap.set(k, mesh)
+      if (block.type === BlockType.NUKE) {
+        nukeMeshes.add(mesh)
+        updateNeighborGlow(block.x, block.y, block.z)
+      }
       scene.add(mesh)
       if (isSolid(block)) {
         const cur = colMap.get(colKey(block)) ?? -Infinity
@@ -92,10 +133,13 @@ export function createWorldManager(scene, initialBlocks) {
       const k = posKey(pos)
       const mesh = meshMap.get(k)
       if (!mesh) return
+      const wasNuke = mesh.userData.block.type === BlockType.NUKE
       scene.remove(mesh)
       mesh.geometry.dispose()
       mesh.material.dispose()
       meshMap.delete(k)
+      nukeMeshes.delete(mesh)
+      if (wasNuke) updateNeighborGlow(pos.x, pos.y, pos.z)
       if (isSolid(pos)) rebuildColumn(pos.x, pos.z)
     },
   }

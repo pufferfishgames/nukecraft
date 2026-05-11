@@ -14,6 +14,7 @@ export const BlockType = {
   STONE_BRICK: 8,
   CONCRETE: 9,
   GRAVEL: 10,
+  NUKE: 11,
 }
 
 export const BLOCK_COLORS = {
@@ -27,6 +28,7 @@ export const BLOCK_COLORS = {
   [BlockType.STONE_BRICK]: 0x78909c,
   [BlockType.CONCRETE]: 0xbdbdbd,
   [BlockType.GRAVEL]: 0x757575,
+  [BlockType.NUKE]:   0x0d2b0d,
 }
 
 // Deterministic pseudo-random based on position + salt

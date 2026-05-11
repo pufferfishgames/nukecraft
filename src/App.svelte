@@ -6,15 +6,18 @@
   import { joystickAxes, touchLookDelta, JOYSTICK_RADIUS, TOUCH_SENSITIVITY } from './game/touch.js'
   import { applyGravity, applyJump, applyDescend, resolveGround, PLAYER_EYE_HEIGHT } from './game/physics.js'
   import { BlockType, BLOCK_COLORS } from './game/world.js'
+  import { countConnectedNuke, explosionPositions, NUKE_CHAIN_LIMIT, EXPLOSION_RADIUS } from './game/nuke.js'
 
   let canvas
   let overlay = true
   let selectedSlot = 0
   let isMobile = false
+  let exploding = false
 
   const PLAYER_SPEED  = 5
   const MOUSE_SENSITIVITY = 0.002
   const REACH = 5
+  const SHAKE_DURATION = 0.55
 
   const HOTBAR = [
     { type: BlockType.DIRT,        label: 'Dirt' },
@@ -26,6 +29,7 @@
     { type: BlockType.STONE_BRICK, label: 'Brick' },
     { type: BlockType.CONCRETE,    label: 'Concrete' },
     { type: BlockType.GRAVEL,      label: 'Gravel' },
+    { type: BlockType.NUKE,        label: '☢ Nuke', symbol: '☢' },
   ]
 
   function slotColor(slot) {
@@ -84,6 +88,7 @@
     // Physics state (frame-local, not reactive)
     let velocityY  = 0
     let isGrounded = false
+    let shakeTime  = 0
 
     // ── Raycast helpers ──────────────────────────────────────────────────────
     function raycastTarget() {
@@ -121,12 +126,25 @@
       if (!hit) return
       const block = hit.object.userData.block
       const n = hit.face.normal
-      worldManager.addBlock({
+      const newBlock = {
         x: block.x + Math.round(n.x),
         y: block.y + Math.round(n.y),
         z: block.z + Math.round(n.z),
         type: HOTBAR[selectedSlot].type,
-      })
+      }
+      worldManager.addBlock(newBlock)
+      if (newBlock.type === BlockType.NUKE) {
+        const count = countConnectedNuke(newBlock, (x, y, z) => worldManager.hasNukeAt(x, y, z))
+        if (count > NUKE_CHAIN_LIMIT) triggerExplosion(newBlock)
+      }
+    }
+
+    function triggerExplosion(center) {
+      const positions = explosionPositions(center.x, center.y, center.z, EXPLOSION_RADIUS)
+      for (const pos of positions) worldManager.removeBlock(pos)
+      exploding = true
+      setTimeout(() => { exploding = false }, 500)
+      shakeTime = SHAKE_DURATION
     }
 
     // ── Keyboard ─────────────────────────────────────────────────────────────
@@ -137,7 +155,8 @@
       keyboard.onKeyDown(e)
       if (e.code.startsWith('Digit')) {
         const n = parseInt(e.code[5]) - 1
-        if (n >= 0 && n < HOTBAR.length) selectedSlot = n
+        if (n === -1) selectedSlot = HOTBAR.length - 1  // 0 key → nuke
+        else if (n >= 0 && n < HOTBAR.length) selectedSlot = n
       }
       if (e.code === 'KeyQ') selectedSlot = (selectedSlot - 1 + HOTBAR.length) % HOTBAR.length
       if (e.code === 'KeyE') selectedSlot = (selectedSlot + 1) % HOTBAR.length
@@ -256,6 +275,20 @@
       velocityY  = resolved.velocityY
       isGrounded = resolved.isGrounded
 
+      // Nuke block plasma animation
+      worldManager.animateNukeBlocks(now / 1000)
+
+      // Camera shake after explosion
+      let shakeOffX = 0, shakeOffZ = 0
+      if (shakeTime > 0) {
+        shakeTime -= delta
+        const s = (shakeTime / SHAKE_DURATION) * 0.25
+        shakeOffX = (Math.random() - 0.5) * s
+        shakeOffZ = (Math.random() - 0.5) * s
+        camera.rotation.x += shakeOffX
+        camera.rotation.z += shakeOffZ
+      }
+
       // Per-frame block targeting visuals
       const hit = raycastTarget()
       if (hit) {
@@ -272,6 +305,10 @@
       }
 
       renderer.render(scene, camera)
+      if (shakeOffX || shakeOffZ) {
+        camera.rotation.x -= shakeOffX
+        camera.rotation.z -= shakeOffZ
+      }
       requestAnimationFrame(loop)
     }
     requestAnimationFrame(loop)
@@ -310,11 +347,16 @@
         <li><kbd>WASD</kbd> / Arrows — move</li>
         <li>Mouse — look &nbsp; <kbd>Space</kbd> — jump &nbsp; <kbd>Shift</kbd> — descend</li>
         <li><kbd>LMB</kbd>/<kbd>R</kbd> — break &nbsp; <kbd>RMB</kbd>/<kbd>F</kbd> — place</li>
-        <li><kbd>1–9</kbd> / Scroll / <kbd>Q</kbd><kbd>E</kbd> — cycle blocks</li>
+        <li><kbd>1–9</kbd><kbd>0</kbd> / Scroll / <kbd>Q</kbd><kbd>E</kbd> — cycle blocks</li>
+        <li>☢ Nuke — key <kbd>0</kbd> — explodes when 10+ connected</li>
         <li><kbd>Esc</kbd> — pause</li>
       {/if}
     </ul>
   </div>
+{/if}
+
+{#if exploding}
+  <div class="explosion-flash" aria-hidden="true"></div>
 {/if}
 
 {#if !overlay}
@@ -326,11 +368,13 @@
       <div
         class="hotbar-slot"
         class:selected={i === selectedSlot}
+        class:nuke-slot={item.symbol}
         style="background:{slotColor(i)}"
-        title="{i + 1}: {item.label}"
+        title="{i < 9 ? i + 1 : 0}: {item.label}"
         onclick={() => { selectedSlot = i }}
       >
-        <span class="slot-num">{i + 1}</span>
+        <span class="slot-num">{i < 9 ? i + 1 : 0}</span>
+        {#if item.symbol}<span class="slot-symbol">{item.symbol}</span>{/if}
       </div>
     {/each}
   </div>
@@ -539,5 +583,39 @@
 
   .mob-btn:active {
     background: rgba(255, 255, 255, 0.25);
+  }
+
+  .explosion-flash {
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(circle, rgba(0,255,68,0.65) 0%, rgba(0,255,68,0) 70%);
+    pointer-events: none;
+    animation: nuke-flash 0.5s ease-out forwards;
+    z-index: 50;
+  }
+
+  @keyframes nuke-flash {
+    0%   { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  .nuke-slot {
+    border-color: rgba(0, 255, 68, 0.6) !important;
+    box-shadow: 0 0 8px rgba(0, 255, 68, 0.5), inset 0 0 6px rgba(0, 0, 0, 0.4) !important;
+  }
+
+  .nuke-slot.selected {
+    border-color: #00ff44 !important;
+    box-shadow: 0 0 12px rgba(0, 255, 68, 0.9), 0 0 0 2px #00ff44, inset 0 0 6px rgba(0, 0, 0, 0.4) !important;
+  }
+
+  .slot-symbol {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 1.3rem;
+    pointer-events: none;
+    filter: drop-shadow(0 0 4px rgba(0, 255, 68, 0.9));
   }
 </style>
