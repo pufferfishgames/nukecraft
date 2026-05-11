@@ -1,6 +1,18 @@
 import * as THREE from 'three'
-import { generateWorld, makeBlockMesh, BlockType } from './world.js'
+import { generateWorld, BlockType, BLOCK_COLORS, BLOCK_SIZE } from './world.js'
 import { buildColMap, getGroundY as _getGroundY } from './physics.js'
+
+function makeBlockMesh(block) {
+  const geometry = new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE)
+  const material = new THREE.MeshLambertMaterial({
+    color: BLOCK_COLORS[block.type] ?? 0xffffff,
+    ...(block.type === BlockType.WATER ? { transparent: true, opacity: 0.65 } : {}),
+  })
+  const mesh = new THREE.Mesh(geometry, material)
+  mesh.position.set(block.x, block.y, block.z)
+  mesh.userData.block = block
+  return mesh
+}
 
 export function createRenderer(canvas) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true })

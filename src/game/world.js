@@ -1,5 +1,3 @@
-import * as THREE from 'three'
-
 export const BLOCK_SIZE = 1
 export const CHUNK_SIZE = 16
 export const WORLD_HEIGHT = 8
@@ -179,21 +177,3 @@ export function generateWorld() {
   })
 }
 
-// ─── Mesh utilities ──────────────────────────────────────────────────────────
-
-export function makeBlockMesh(block) {
-  const geometry = new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE)
-  const material = new THREE.MeshLambertMaterial({
-    color: BLOCK_COLORS[block.type] ?? 0xffffff,
-    ...(block.type === BlockType.WATER ? { transparent: true, opacity: 0.65 } : {}),
-  })
-  const mesh = new THREE.Mesh(geometry, material)
-  mesh.position.set(block.x, block.y, block.z)
-  mesh.userData.block = block
-  return mesh
-}
-
-// kept for backward compat
-export function buildChunkMesh(blocks) {
-  return blocks.map(makeBlockMesh)
-}
