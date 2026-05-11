@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from 'svelte'
+  import { onMount, tick } from 'svelte'
   import * as THREE from 'three'
   import { createRenderer } from './game/renderer.js'
   import { createKeyboardState, computeMovement, computeMovementAxes, KEYS } from './game/controls.js'
@@ -21,6 +21,7 @@
   let resetCamera = () => {}
 
   let showNostr = false
+  let passphraseInput
   let passphrase = ''
   let privkey = ''
   let pubkey = ''
@@ -43,6 +44,8 @@
     showNostr = true
     document.body.classList.add('nostr-open')
     if (document.pointerLockElement === canvas) document.exitPointerLock()
+    await tick()
+    passphraseInput?.focus()
   }
 
   function closeNostr() {
@@ -86,6 +89,17 @@
     worldManager.loadBlocks(blocks)
     resetCamera()
     closeNostr()
+  }
+
+  async function downloadMap(map) {
+    const blocks = await decodeBlocks(map.content)
+    const blob = new Blob([JSON.stringify(blocks)], { type: 'application/json' })
+    const a = Object.assign(document.createElement('a'), {
+      href: URL.createObjectURL(blob),
+      download: `nukecraft-${map.id.slice(0, 8)}.json`,
+    })
+    a.click()
+    URL.revokeObjectURL(a.href)
   }
   let selectedSlot = 0
   let isMobile = false
@@ -505,7 +519,7 @@
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
   <div class="nostr-panel" onclick={(e) => e.stopPropagation()}>
     <div class="nostr-header">
-      <span>Nostr Maps</span>
+      <span>Maps</span>
       <button onclick={closeNostr} class="close-btn">×</button>
     </div>
     <div class="nostr-body">
@@ -513,6 +527,7 @@
       <input
         type="password"
         class="passphrase-input"
+        bind:this={passphraseInput}
         bind:value={passphrase}
         placeholder="Your secret passphrase"
         autocomplete="off"
@@ -538,8 +553,16 @@
             {#each remoteMaps as map}
               <div class="map-row" class:own={map.pubkey === pubkey}>
                 <span class="map-author">
-                  {#if map.pubkey === pubkey}★ you{:else}{map.pubkey.slice(0, 12)}…{/if}
+                  {#if map.pubkey === pubkey}★ you{:else}{map.pubkey.slice(0, 10)}…{/if}
                 </span>
+                <a
+                  href="https://njump.me/{map.id}"
+                  target="_blank"
+                  rel="noopener"
+                  class="map-id-link"
+                  title={map.id}
+                >{map.id.slice(0, 8)}…</a>
+                <button onclick={() => downloadMap(map)} class="dl-btn" title="Download map as JSON">⬇</button>
                 <button onclick={() => applyMap(map)} class="load-btn">Load</button>
               </div>
             {/each}
@@ -563,8 +586,7 @@
     touch-action: none;
   }
 
-  :global(body.nostr-open),
-  :global(body.nostr-open *) {
+  :global(body.nostr-open) {
     cursor: default !important;
   }
 
@@ -931,6 +953,26 @@
     flex-shrink: 0;
   }
   .load-btn:hover { color: #fff; border-color: rgba(255,255,255,0.5); }
+
+  .map-id-link {
+    color: rgba(0, 255, 68, 0.5);
+    font-size: 0.68rem;
+    text-decoration: none;
+    flex-shrink: 0;
+    cursor: pointer;
+  }
+  .map-id-link:hover { color: #00ff44; text-decoration: underline; }
+
+  .dl-btn {
+    background: none;
+    border: none;
+    color: #888;
+    font-size: 0.8rem;
+    padding: 0 2px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .dl-btn:hover { color: #fff; }
 
   .maps-empty {
     font-size: 0.78rem;
