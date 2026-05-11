@@ -3,7 +3,6 @@
   import * as THREE from 'three'
   import { createRenderer } from './game/renderer.js'
   import { createKeyboardState, computeMovement, KEYS } from './game/controls.js'
-  import { removeBlock, placeBlock } from './game/building.js'
   import { BlockType, BLOCK_COLORS } from './game/world.js'
 
   let canvas
@@ -32,14 +31,30 @@
     return '#' + hex.toString(16).padStart(6, '0')
   }
 
+  // Called from overlay click OR Esc keydown — both fire from user gestures
+  function startGame() {
+    overlay = false
+    canvas?.requestPointerLock()
+  }
+
   onMount(() => {
     const { renderer, scene, camera, resize, worldManager } = createRenderer(canvas)
     resize()
     window.addEventListener('resize', resize)
 
+    // Show overlay again whenever pointer lock exits (browser Esc while playing)
+    document.addEventListener('pointerlockchange', () => {
+      if (document.pointerLockElement !== canvas) overlay = true
+    })
+
     const keyboard = createKeyboardState()
 
     function onKeyDown(e) {
+      // Esc while overlay is showing → start game
+      if (e.code === 'Escape' && overlay) {
+        startGame()
+        return
+      }
       keyboard.onKeyDown(e)
       if (e.code.startsWith('Digit')) {
         const n = parseInt(e.code[5]) - 1
@@ -73,14 +88,9 @@
       return hits.length ? hits[0] : null
     }
 
+    // Canvas click = break block (overlay is never visible when this fires)
     canvas.addEventListener('click', () => {
-      if (overlay) {
-        overlay = false
-        canvas.requestPointerLock()
-        return
-      }
       if (document.pointerLockElement !== canvas) return
-      // Left click — break block
       const hit = raycastTarget()
       if (!hit) return
       const block = hit.object.userData.block
@@ -91,7 +101,6 @@
     canvas.addEventListener('contextmenu', (e) => {
       e.preventDefault()
       if (document.pointerLockElement !== canvas) return
-      // Right click — place block
       const hit = raycastTarget()
       if (!hit) return
       const block = hit.object.userData.block
@@ -104,7 +113,6 @@
       })
     })
 
-    // Scroll wheel cycles hotbar
     canvas.addEventListener('wheel', (e) => {
       if (document.pointerLockElement !== canvas) return
       selectedSlot = (selectedSlot + (e.deltaY > 0 ? 1 : -1) + HOTBAR.length) % HOTBAR.length
@@ -135,19 +143,21 @@
   })
 </script>
 
-<canvas bind:this={canvas} class="game-canvas" aria-label="Minecraft game world"></canvas>
+<canvas bind:this={canvas} class="game-canvas" aria-label="Nikolai's Minecraft"></canvas>
 
 {#if overlay}
-  <div class="overlay" data-testid="overlay">
-    <h1>Svelte Minecraft</h1>
-    <p>Click to play</p>
+  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+  <div class="overlay" data-testid="overlay" onclick={startGame}>
+    <h1>Nikolai's Minecraft</h1>
+    <p>Click or press Esc to play</p>
     <ul>
       <li><kbd>WASD</kbd> / Arrows — move</li>
       <li>Mouse — look around</li>
       <li><kbd>Space</kbd> — fly up</li>
       <li><kbd>LMB</kbd> — break block</li>
       <li><kbd>RMB</kbd> — place block</li>
-      <li><kbd>1–9</kbd> / Scroll — select block</li>
+      <li><kbd>1–9</kbd> / Scroll / <kbd>Q</kbd><kbd>E</kbd> — select block</li>
+      <li><kbd>Esc</kbd> — pause</li>
     </ul>
   </div>
 {/if}
@@ -176,6 +186,7 @@
     overflow: hidden;
     background: #000;
     font-family: monospace;
+    cursor: none;
   }
 
   .game-canvas {
@@ -195,6 +206,7 @@
     background: rgba(0, 0, 0, 0.65);
     color: #fff;
     user-select: none;
+    cursor: pointer;
   }
 
   .overlay h1 {
@@ -264,7 +276,6 @@
     border-radius: 4px;
     position: relative;
     box-shadow: inset 0 0 6px rgba(0, 0, 0, 0.4);
-    transition: border-color 0.1s;
   }
 
   .hotbar-slot.selected {
