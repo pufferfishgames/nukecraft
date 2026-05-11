@@ -293,13 +293,13 @@
 <canvas
   bind:this={canvas}
   class="game-canvas"
-  aria-label="Nukecraft"
+  aria-label="Nikolai's Nukecraft"
 ></canvas>
 
 {#if overlay}
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
   <div class="overlay" data-testid="overlay" onclick={startGame}>
-    <h1>Nukecraft</h1>
+    <h1>Nikolai's Nukecraft</h1>
     <p>{isMobile ? 'Tap to play' : 'Click or press Esc to play'}</p>
     <ul>
       {#if isMobile}
