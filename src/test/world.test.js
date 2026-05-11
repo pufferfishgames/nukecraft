@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from 'vitest'
 import { generateTerrain, generateWorld, BlockType, CHUNK_SIZE } from '../game/world.js'
 

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from 'vitest'
 import { createKeyboardState, computeMovement, computeMovementAxes, KEYS } from '../game/controls.js'
 

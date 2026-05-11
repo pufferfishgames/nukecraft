@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from 'vitest'
 import { removeBlock, placeBlock } from '../game/building.js'
 import { BlockType } from '../game/world.js'
