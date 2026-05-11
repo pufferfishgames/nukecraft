@@ -194,15 +194,16 @@
     _breakBlock = () => {
       const hit = raycastTarget()
       if (!hit) return
-      const block = hit.object.userData.block
-      if (block.type === BlockType.WATER) return
+      const block = worldManager.getBlockFromHit(hit)
+      if (!block || block.type === BlockType.WATER) return
       worldManager.removeBlock(block)
     }
 
     _placeBlock = () => {
       const hit = raycastTarget()
       if (!hit) return
-      const block = hit.object.userData.block
+      const block = worldManager.getBlockFromHit(hit)
+      if (!block) return
       const n = hit.face.normal
       const newBlock = {
         x: block.x + Math.round(n.x),
@@ -372,13 +373,13 @@
 
       // Per-frame block targeting visuals
       const hit = raycastTarget()
-      if (hit) {
-        const b = hit.object.userData.block
-        highlightLine.position.set(b.x, b.y, b.z)
+      const hitBlock = hit ? worldManager.getBlockFromHit(hit) : null
+      if (hit && hitBlock) {
+        highlightLine.position.set(hitBlock.x, hitBlock.y, hitBlock.z)
         highlightLine.visible = true
         const n = hit.face.normal
         ghostMat.color.setHex(BLOCK_COLORS[HOTBAR[selectedSlot].type] ?? 0x888888)
-        ghostMesh.position.set(b.x + Math.round(n.x), b.y + Math.round(n.y), b.z + Math.round(n.z))
+        ghostMesh.position.set(hitBlock.x + Math.round(n.x), hitBlock.y + Math.round(n.y), hitBlock.z + Math.round(n.z))
         ghostMesh.visible = true
       } else {
         highlightLine.visible = false
@@ -406,6 +407,8 @@
     }
   })
 </script>
+
+<svelte:body class:nostr-open={showNostr} />
 
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 <canvas
@@ -557,6 +560,11 @@
     font-family: monospace;
     cursor: none;
     touch-action: none;
+  }
+
+  :global(body.nostr-open),
+  :global(body.nostr-open *) {
+    cursor: default !important;
   }
 
   .game-canvas {
