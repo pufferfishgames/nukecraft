@@ -68,4 +68,23 @@ describe('computeMovement', () => {
     const rotated = computeMovement(kb, Math.PI / 2, speed, delta)
     expect(Math.abs(rotated.x)).toBeGreaterThan(Math.abs(straight.x))
   })
+
+  // Regression: forward must align with camera look direction at any yaw.
+  // At yaw=π/2 the camera looks along -X, so forward must produce negative X.
+  it('forward aligns with camera look direction at yaw=π/2', () => {
+    const kb = createKeyboardState()
+    kb.onKeyDown({ code: 'KeyW' })
+    const { x, z } = computeMovement(kb, Math.PI / 2, speed, delta)
+    expect(x).toBeLessThan(0)            // camera looks toward -X
+    expect(Math.abs(z)).toBeLessThan(1e-10)
+  })
+
+  // At yaw=π/2 camera faces -X. Camera-right = (0,0,-1), so camera-left = (0,0,+1).
+  it('left strafe is perpendicular to forward and correct at yaw=π/2', () => {
+    const kb = createKeyboardState()
+    kb.onKeyDown({ code: 'KeyA' })
+    const { x, z } = computeMovement(kb, Math.PI / 2, speed, delta)
+    expect(z).toBeGreaterThan(0)         // strafe left moves in +Z when facing -X
+    expect(Math.abs(x)).toBeLessThan(1e-10)
+  })
 })

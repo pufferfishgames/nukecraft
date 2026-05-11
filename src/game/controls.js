@@ -30,8 +30,10 @@ export function computeMovement(keyboard, yaw, speed, delta) {
   const sinY = Math.sin(yaw)
   const cosY = Math.cos(yaw)
 
+  // camera forward = (-sinY, 0, -cosY), camera right = (cosY, 0, -sinY)
+  // move = -dz * forward + dx * right  (dz is -1 when W pressed)
   return {
-    x: (dx * cosY - dz * sinY) * speed * delta,
-    z: (dx * sinY + dz * cosY) * speed * delta,
+    x: (dx * cosY + dz * sinY) * speed * delta,
+    z: (-dx * sinY + dz * cosY) * speed * delta,
   }
 }
