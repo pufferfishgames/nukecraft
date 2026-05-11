@@ -94,6 +94,20 @@
       return hits.length ? hits[0] : null
     }
 
+    // ── Block highlight (cube edge outline) ──────────────────────────────────
+    const highlightLine = new THREE.LineSegments(
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(1.02, 1.02, 1.02)),
+      new THREE.LineBasicMaterial({ color: 0x000000, depthTest: false })
+    )
+    highlightLine.visible = false
+    scene.add(highlightLine)
+
+    // ── Ghost block (translucent placement preview) ──────────────────────────
+    const ghostMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.38 })
+    const ghostMesh = new THREE.Mesh(new THREE.BoxGeometry(0.98, 0.98, 0.98), ghostMat)
+    ghostMesh.visible = false
+    scene.add(ghostMesh)
+
     _breakBlock = () => {
       const hit = raycastTarget()
       if (!hit) return
@@ -127,6 +141,8 @@
       }
       if (e.code === 'KeyQ') selectedSlot = (selectedSlot - 1 + HOTBAR.length) % HOTBAR.length
       if (e.code === 'KeyE') selectedSlot = (selectedSlot + 1) % HOTBAR.length
+      if (e.code === 'KeyF' || e.code === 'Enter') { e.preventDefault(); _placeBlock() }
+      if (e.code === 'KeyR') _breakBlock()
     }
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', keyboard.onKeyUp)
@@ -142,15 +158,12 @@
     })
 
     // ── Desktop clicks ───────────────────────────────────────────────────────
-    canvas.addEventListener('click', () => {
+    canvas.addEventListener('mousedown', (e) => {
       if (document.pointerLockElement !== canvas) return
-      _breakBlock()
+      if (e.button === 0) _breakBlock()
+      if (e.button === 2) _placeBlock()
     })
-    canvas.addEventListener('contextmenu', (e) => {
-      e.preventDefault()
-      if (document.pointerLockElement !== canvas) return
-      _placeBlock()
-    })
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault())
     canvas.addEventListener('wheel', (e) => {
       if (document.pointerLockElement !== canvas) return
       selectedSlot = (selectedSlot + (e.deltaY > 0 ? 1 : -1) + HOTBAR.length) % HOTBAR.length
@@ -243,6 +256,21 @@
       velocityY  = resolved.velocityY
       isGrounded = resolved.isGrounded
 
+      // Per-frame block targeting visuals
+      const hit = raycastTarget()
+      if (hit) {
+        const b = hit.object.userData.block
+        highlightLine.position.set(b.x, b.y, b.z)
+        highlightLine.visible = true
+        const n = hit.face.normal
+        ghostMat.color.setHex(BLOCK_COLORS[HOTBAR[selectedSlot].type] ?? 0x888888)
+        ghostMesh.position.set(b.x + Math.round(n.x), b.y + Math.round(n.y), b.z + Math.round(n.z))
+        ghostMesh.visible = true
+      } else {
+        highlightLine.visible = false
+        ghostMesh.visible = false
+      }
+
       renderer.render(scene, camera)
       requestAnimationFrame(loop)
     }
@@ -252,6 +280,10 @@
       window.removeEventListener('resize', resize)
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', keyboard.onKeyUp)
+      highlightLine.geometry.dispose()
+      highlightLine.material.dispose()
+      ghostMesh.geometry.dispose()
+      ghostMat.dispose()
       renderer.dispose()
     }
   })
@@ -261,13 +293,13 @@
 <canvas
   bind:this={canvas}
   class="game-canvas"
-  aria-label="Nikolai's Minecraft"
+  aria-label="Nukecraft"
 ></canvas>
 
 {#if overlay}
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
   <div class="overlay" data-testid="overlay" onclick={startGame}>
-    <h1>Nikolai's Minecraft</h1>
+    <h1>Nukecraft</h1>
     <p>{isMobile ? 'Tap to play' : 'Click or press Esc to play'}</p>
     <ul>
       {#if isMobile}
@@ -277,8 +309,8 @@
       {:else}
         <li><kbd>WASD</kbd> / Arrows — move</li>
         <li>Mouse — look &nbsp; <kbd>Space</kbd> — jump &nbsp; <kbd>Shift</kbd> — descend</li>
-        <li><kbd>LMB</kbd> — break &nbsp; <kbd>RMB</kbd> — place</li>
-        <li><kbd>1–9</kbd> / Scroll / <kbd>Q</kbd><kbd>E</kbd> — select block</li>
+        <li><kbd>LMB</kbd>/<kbd>R</kbd> — break &nbsp; <kbd>RMB</kbd>/<kbd>F</kbd> — place</li>
+        <li><kbd>1–9</kbd> / Scroll / <kbd>Q</kbd><kbd>E</kbd> — cycle blocks</li>
         <li><kbd>Esc</kbd> — pause</li>
       {/if}
     </ul>
