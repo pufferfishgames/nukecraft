@@ -11,6 +11,7 @@
   import { createMapEvent, signEvent } from './nostr/events.js'
   import { mineEvent, MIN_POW_DIFFICULTY } from './nostr/pow.js'
   import { publishMap, fetchMaps } from './nostr/relay.js'
+  import { decodeBlocks } from './nostr/codec.js'
 
   const RELAY_URL = 'wss://relay.damus.io'
 
@@ -77,8 +78,8 @@
     }
   }
 
-  function applyMap(event) {
-    const blocks = JSON.parse(event.content)
+  async function applyMap(event) {
+    const blocks = await decodeBlocks(event.content)
     worldManager.loadBlocks(blocks)
     resetCamera()
     closeNostr()
