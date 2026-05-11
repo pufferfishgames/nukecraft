@@ -7,9 +7,82 @@
   import { applyGravity, applyJump, applyDescend, resolveGround, PLAYER_EYE_HEIGHT } from './game/physics.js'
   import { BlockType, BLOCK_COLORS } from './game/world.js'
   import { countConnectedNuke, explosionPositions, NUKE_CHAIN_LIMIT, EXPLOSION_RADIUS } from './game/nuke.js'
+  import { passphraseToPrivkey, privkeyToPubkey } from './nostr/identity.js'
+  import { createMapEvent, signEvent } from './nostr/events.js'
+  import { mineEvent, MIN_POW_DIFFICULTY } from './nostr/pow.js'
+  import { publishMap, fetchMaps } from './nostr/relay.js'
+
+  const RELAY_URL = 'wss://relay.damus.io'
 
   let canvas
   let overlay = true
+  let worldManager = null
+  let resetCamera = () => {}
+
+  let showNostr = false
+  let passphrase = ''
+  let privkey = ''
+  let pubkey = ''
+  let saveStatus = ''
+  let remoteMaps = []
+  let loadingMaps = false
+
+  $: {
+    const p = passphrase.trim()
+    if (p) {
+      privkey = passphraseToPrivkey(p)
+      pubkey = privkeyToPubkey(privkey)
+    } else {
+      privkey = ''
+      pubkey = ''
+    }
+  }
+
+  async function openNostr() {
+    showNostr = true
+    if (document.pointerLockElement === canvas) document.exitPointerLock()
+  }
+
+  function closeNostr() {
+    showNostr = false
+    if (!overlay) canvas?.requestPointerLock()
+  }
+
+  async function saveMap() {
+    if (!privkey || !worldManager) return
+    saveStatus = 'saving'
+    try {
+      const blocks = worldManager.getBlocks()
+      const event = createMapEvent(pubkey, blocks)
+      const mined = mineEvent(event, MIN_POW_DIFFICULTY)
+      const signed = signEvent(mined, privkey)
+      await publishMap(RELAY_URL, signed)
+      saveStatus = 'saved'
+      setTimeout(() => { saveStatus = '' }, 2000)
+    } catch {
+      saveStatus = 'error'
+      setTimeout(() => { saveStatus = '' }, 3000)
+    }
+  }
+
+  async function refreshMaps() {
+    loadingMaps = true
+    remoteMaps = []
+    try {
+      remoteMaps = await fetchMaps(RELAY_URL, MIN_POW_DIFFICULTY)
+    } catch {
+      // relay unreachable — leave list empty
+    } finally {
+      loadingMaps = false
+    }
+  }
+
+  function applyMap(event) {
+    const blocks = JSON.parse(event.content)
+    worldManager.loadBlocks(blocks)
+    resetCamera()
+    closeNostr()
+  }
   let selectedSlot = 0
   let isMobile = false
   let exploding = false
@@ -72,12 +145,16 @@
   onMount(() => {
     isMobile = window.matchMedia('(pointer: coarse)').matches
 
-    const { renderer, scene, camera, resize, worldManager } = createRenderer(canvas)
+    const result = createRenderer(canvas)
+    worldManager = result.worldManager
+    const { renderer, scene, camera, resize } = result
     resize()
     window.addEventListener('resize', resize)
 
+    resetCamera = () => { camera.position.set(16, 12, 16) }
+
     document.addEventListener('pointerlockchange', () => {
-      if (document.pointerLockElement !== canvas) overlay = true
+      if (document.pointerLockElement !== canvas && !showNostr) overlay = true
     })
 
     let yaw = Math.PI * 1.25
@@ -151,7 +228,10 @@
     const keyboard = createKeyboardState()
 
     function onKeyDown(e) {
+      if (e.target.tagName === 'INPUT') return
+      if (e.code === 'Escape' && showNostr) { closeNostr(); return }
       if (e.code === 'Escape' && overlay) { startGame(); return }
+      if (e.code === 'KeyN') { e.preventDefault(); openNostr(); return }
       keyboard.onKeyDown(e)
       if (e.code.startsWith('Digit')) {
         const n = parseInt(e.code[5]) - 1
@@ -349,6 +429,7 @@
         <li><kbd>LMB</kbd>/<kbd>R</kbd> — break &nbsp; <kbd>RMB</kbd>/<kbd>F</kbd> — place</li>
         <li><kbd>1–9</kbd><kbd>0</kbd> / Scroll / <kbd>Q</kbd><kbd>E</kbd> — cycle blocks</li>
         <li>☢ Nuke — key <kbd>0</kbd> — explodes when 10+ connected</li>
+        <li><kbd>N</kbd> — Nostr maps (save / load)</li>
         <li><kbd>Esc</kbd> — pause</li>
       {/if}
     </ul>
@@ -408,8 +489,62 @@
       <button class="mob-btn small"
         ontouchstart={(e) => { e.stopPropagation(); selectedSlot = (selectedSlot + 1) % HOTBAR.length }}
         aria-label="Next block">▶</button>
+      <button class="mob-btn small"
+        ontouchstart={(e) => { e.stopPropagation(); openNostr() }}
+        aria-label="Nostr maps">☁</button>
     </div>
   {/if}
+{/if}
+
+{#if showNostr}
+  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+  <div class="nostr-panel" onclick={(e) => e.stopPropagation()}>
+    <div class="nostr-header">
+      <span>Nostr Maps</span>
+      <button onclick={closeNostr} class="close-btn">×</button>
+    </div>
+    <div class="nostr-body">
+      <label class="field-label">Passphrase</label>
+      <input
+        type="password"
+        class="passphrase-input"
+        bind:value={passphrase}
+        placeholder="Your secret passphrase"
+        autocomplete="off"
+      />
+      {#if pubkey}
+        <div class="pubkey-hint">key: {pubkey.slice(0, 16)}…</div>
+        <button onclick={saveMap} disabled={saveStatus === 'saving'} class="action-btn">
+          {saveStatus === 'saving' ? 'Mining PoW…' : saveStatus === 'saved' ? '✓ Saved to Nostr' : saveStatus === 'error' ? '✗ Relay error' : '💾 Save my map'}
+        </button>
+      {:else}
+        <div class="pubkey-hint">Enter passphrase to enable saving</div>
+      {/if}
+
+      <div class="maps-section">
+        <div class="maps-section-header">
+          Community maps
+          <button onclick={refreshMaps} disabled={loadingMaps} class="refresh-btn">
+            {loadingMaps ? '…' : '↻ Fetch'}
+          </button>
+        </div>
+        {#if remoteMaps.length > 0}
+          <div class="maps-list">
+            {#each remoteMaps as map}
+              <div class="map-row" class:own={map.pubkey === pubkey}>
+                <span class="map-author">
+                  {#if map.pubkey === pubkey}★ you{:else}{map.pubkey.slice(0, 12)}…{/if}
+                </span>
+                <button onclick={() => applyMap(map)} class="load-btn">Load</button>
+              </div>
+            {/each}
+          </div>
+        {:else if !loadingMaps}
+          <div class="maps-empty">Press ↻ Fetch to browse</div>
+        {/if}
+      </div>
+    </div>
+  </div>
 {/if}
 
 <style>
@@ -617,5 +752,180 @@
     font-size: 1.3rem;
     pointer-events: none;
     filter: drop-shadow(0 0 4px rgba(0, 255, 68, 0.9));
+  }
+
+  /* ── Nostr panel ──────────────────────────────────────────────────────────── */
+  .nostr-panel {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(10, 10, 10, 0.94);
+    border: 1px solid rgba(0, 255, 68, 0.35);
+    border-radius: 6px;
+    color: #ddd;
+    font-family: monospace;
+    width: min(340px, 92vw);
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    z-index: 200;
+    box-shadow: 0 0 24px rgba(0, 255, 68, 0.12);
+  }
+
+  .nostr-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 0.9rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #00ff44;
+  }
+
+  .close-btn {
+    background: none;
+    border: none;
+    color: #888;
+    font-size: 1.2rem;
+    cursor: pointer;
+    line-height: 1;
+    padding: 0 2px;
+  }
+  .close-btn:hover { color: #fff; }
+
+  .nostr-body {
+    padding: 12px 14px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .field-label {
+    font-size: 0.65rem;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .passphrase-input {
+    width: 100%;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 4px;
+    color: #fff;
+    font-family: monospace;
+    font-size: 0.85rem;
+    padding: 7px 10px;
+    box-sizing: border-box;
+  }
+  .passphrase-input:focus {
+    outline: none;
+    border-color: rgba(0, 255, 68, 0.5);
+  }
+
+  .pubkey-hint {
+    font-size: 0.68rem;
+    color: #00ff44;
+    opacity: 0.65;
+  }
+
+  .action-btn {
+    background: rgba(0, 255, 68, 0.12);
+    border: 1px solid rgba(0, 255, 68, 0.35);
+    border-radius: 4px;
+    color: #00ff44;
+    font-family: monospace;
+    font-size: 0.85rem;
+    padding: 7px 12px;
+    cursor: pointer;
+    text-align: left;
+  }
+  .action-btn:hover:not(:disabled) { background: rgba(0, 255, 68, 0.22); }
+  .action-btn:disabled { opacity: 0.45; cursor: default; }
+
+  .maps-section {
+    margin-top: 6px;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    padding-top: 10px;
+  }
+
+  .maps-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.65rem;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 8px;
+  }
+
+  .refresh-btn {
+    background: none;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 3px;
+    color: #999;
+    font-family: monospace;
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    cursor: pointer;
+  }
+  .refresh-btn:hover:not(:disabled) { color: #fff; border-color: rgba(255,255,255,0.5); }
+  .refresh-btn:disabled { opacity: 0.35; cursor: default; }
+
+  .maps-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .map-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.03);
+    border-left: 2px solid transparent;
+  }
+  .map-row.own {
+    border-left-color: #00ff44;
+    background: rgba(0, 255, 68, 0.05);
+  }
+
+  .map-author {
+    flex: 1;
+    font-size: 0.78rem;
+    color: #aaa;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .map-row.own .map-author { color: #00ff44; }
+
+  .load-btn {
+    background: none;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+    color: #aaa;
+    font-family: monospace;
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .load-btn:hover { color: #fff; border-color: rgba(255,255,255,0.5); }
+
+  .maps-empty {
+    font-size: 0.78rem;
+    color: #555;
+    text-align: center;
+    padding: 14px 0;
   }
 </style>

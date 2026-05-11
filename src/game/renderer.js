@@ -99,6 +99,27 @@ export function createWorldManager(scene, initialBlocks) {
   return {
     getMeshes() { return [...meshMap.values()] },
 
+    getBlocks() {
+      return [...meshMap.values()].map((m) => ({ ...m.userData.block }))
+    },
+
+    loadBlocks(newBlocks) {
+      for (const mesh of meshMap.values()) {
+        scene.remove(mesh)
+        mesh.geometry.dispose()
+        mesh.material.dispose()
+      }
+      meshMap.clear()
+      nukeMeshes.clear()
+      colMap = buildColMap(newBlocks.filter(isSolid))
+      for (const block of newBlocks) {
+        const mesh = makeBlockMesh(block)
+        meshMap.set(posKey(block), mesh)
+        if (block.type === BlockType.NUKE) nukeMeshes.add(mesh)
+        scene.add(mesh)
+      }
+    },
+
     getGroundY(px, pz) { return _getGroundY(px, pz, colMap) },
 
     hasNukeAt(x, y, z) {
