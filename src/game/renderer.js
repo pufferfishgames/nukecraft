@@ -6,6 +6,8 @@ const _dummy = new THREE.Object3D()
 const EXTRA_CAP = 256
 const MATERIAL_TEXTURE_SIZE = 32
 const SKY_STAR_COUNT = 144
+const JET_FLYBY_PERIOD = 44
+const JET_FLYBY_DURATION = 18
 
 export const BLOCK_MATERIAL_PROFILES = {
   [BlockType.GRASS]: {
@@ -357,11 +359,22 @@ export function createSkyEnvironment(scene) {
   stars.name = 'stars'
   scene.add(stars)
 
+  const jet = createBoeing747()
+  scene.add(jet)
+
   return {
     update(time) {
       clouds.position.x = ((time * 0.35) % 24) - 12
       clouds.position.z = Math.sin(time * 0.06) * 2
       stars.rotation.y = time * 0.006
+
+      const flybyTime = time % JET_FLYBY_PERIOD
+      jet.visible = flybyTime <= JET_FLYBY_DURATION
+      if (jet.visible) {
+        const progress = flybyTime / JET_FLYBY_DURATION
+        jet.position.set(-88 + progress * 176, 28.5 + Math.sin(time * 0.8) * 0.7, -30 + Math.sin(time * 0.18) * 9)
+        jet.rotation.set(0, Math.PI / 2 + Math.sin(time * 0.12) * 0.08, 0)
+      }
     },
     dispose() {
       sunDisc.geometry.dispose()
@@ -370,8 +383,73 @@ export function createSkyEnvironment(scene) {
       cloudMaterial.dispose()
       starGeometry.dispose()
       starMaterial.dispose()
+      disposeObject(jet)
     },
   }
+}
+
+function createBoeing747() {
+  const jet = new THREE.Group()
+  jet.name = 'boeing-747'
+  jet.visible = false
+
+  const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0xf3f5f8, roughness: 0.48, metalness: 0.12 })
+  const accentMaterial = new THREE.MeshStandardMaterial({ color: 0x1b5ea8, roughness: 0.5, metalness: 0.05 })
+  const windowMaterial = new THREE.MeshBasicMaterial({ color: 0x111820 })
+  const engineMaterial = new THREE.MeshStandardMaterial({ color: 0x2e3339, roughness: 0.62, metalness: 0.18 })
+
+  const fuselage = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.28, 5.8, 18), bodyMaterial)
+  fuselage.rotation.z = Math.PI / 2
+  jet.add(fuselage)
+
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.58, 18), bodyMaterial)
+  nose.position.x = 3.18
+  nose.rotation.z = -Math.PI / 2
+  jet.add(nose)
+
+  const tailCone = new THREE.Mesh(new THREE.ConeGeometry(0.21, 0.48, 18), bodyMaterial)
+  tailCone.position.x = -3.06
+  tailCone.rotation.z = Math.PI / 2
+  jet.add(tailCone)
+
+  const upperDeck = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.24, 0.34), bodyMaterial)
+  upperDeck.position.set(1.1, 0.28, 0)
+  jet.add(upperDeck)
+
+  const wing = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.06, 5.7), bodyMaterial)
+  wing.position.set(-0.25, -0.05, 0)
+  jet.add(wing)
+
+  const tailWing = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.05, 1.9), bodyMaterial)
+  tailWing.position.set(-2.55, 0.06, 0)
+  jet.add(tailWing)
+
+  const verticalTail = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.9, 0.42), accentMaterial)
+  verticalTail.position.set(-2.72, 0.58, 0)
+  verticalTail.rotation.z = -0.18
+  jet.add(verticalTail)
+
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.05, 0.04), accentMaterial)
+  stripe.position.set(0.05, 0.02, -0.27)
+  jet.add(stripe)
+
+  for (let i = 0; i < 9; i++) {
+    const window = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.05, 0.03), windowMaterial)
+    window.position.set(1.85 - i * 0.34, 0.13, -0.3)
+    jet.add(window)
+  }
+
+  for (const x of [-0.75, 0.35]) {
+    for (const z of [-1.75, 1.75]) {
+      const engine = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.32, 12), engineMaterial)
+      engine.position.set(x, -0.33, z)
+      engine.rotation.x = Math.PI / 2
+      jet.add(engine)
+    }
+  }
+
+  jet.scale.setScalar(1.4)
+  return jet
 }
 
 function makeInstMesh(type, maxCount) {

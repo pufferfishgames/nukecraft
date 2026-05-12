@@ -55,7 +55,7 @@ describe('block material realism', () => {
 })
 
 describe('sky environment', () => {
-  it('adds a visible sun, cloud layer, and star field to the scene', () => {
+  it('adds a visible sun, cloud layer, star field, and passenger jet to the scene', () => {
     const scene = new THREE.Scene()
 
     createSkyEnvironment(scene)
@@ -64,6 +64,7 @@ describe('sky environment', () => {
     const sunDisc = scene.getObjectByName('sun-disc')
     const clouds = scene.getObjectByName('clouds')
     const stars = scene.getObjectByName('stars')
+    const jet = scene.getObjectByName('boeing-747')
 
     expect(sunLight).toBeInstanceOf(THREE.DirectionalLight)
     expect(sunDisc).toBeInstanceOf(THREE.Mesh)
@@ -71,18 +72,27 @@ describe('sky environment', () => {
     expect(clouds.children.length).toBeGreaterThan(0)
     expect(stars).toBeInstanceOf(THREE.Points)
     expect(stars.geometry.getAttribute('position').count).toBeGreaterThanOrEqual(96)
+    expect(jet).toBeInstanceOf(THREE.Group)
+    expect(jet.children.length).toBeGreaterThanOrEqual(10)
   })
 
-  it('animates sky details without moving the sun anchor', () => {
+  it('animates sky details and periodic jet flybys without moving the sun anchor', () => {
     const scene = new THREE.Scene()
     const sky = createSkyEnvironment(scene)
     const sunDisc = scene.getObjectByName('sun-disc')
     const clouds = scene.getObjectByName('clouds')
+    const jet = scene.getObjectByName('boeing-747')
     const initialSun = sunDisc.position.clone()
 
-    sky.update(12)
+    sky.update(8)
 
     expect(clouds.position.x).not.toBe(0)
+    expect(jet.visible).toBe(true)
+    expect(jet.position.y).toBeGreaterThanOrEqual(26)
+    expect(jet.position.y).toBeLessThanOrEqual(32)
     expect(sunDisc.position.equals(initialSun)).toBe(true)
+
+    sky.update(24)
+    expect(jet.visible).toBe(false)
   })
 })
