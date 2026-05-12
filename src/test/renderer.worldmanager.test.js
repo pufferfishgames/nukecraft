@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import * as THREE from 'three'
 import { describe, it, expect } from 'vitest'
 import { createRemotePlayerManager, createWorldManager } from '../game/renderer.js'
 import { BlockType } from '../game/world.js'
@@ -158,6 +159,36 @@ describe('createWorldManager loadBlocks', () => {
     const wm = createWorldManager(scene, [])
     wm.loadBlocks([b(100, 0, 100, BlockType.SAND)])
     expect(scene.meshes.every(m => m.frustumCulled === false)).toBe(true)
+  })
+})
+
+describe('createWorldManager render groups', () => {
+  it('offsets selected block instances without changing saved block coordinates', () => {
+    const scene = makeScene()
+    const selected = b(10, 4, 10, BlockType.STONE)
+    const unselected = b(20, 4, 20, BlockType.STONE)
+    const wm = createWorldManager(scene, [selected, unselected])
+    const group = wm.createRenderGroup((block) => block.x === selected.x)
+    const mesh = scene.meshes[0]
+    const matrix = new THREE.Matrix4()
+    const position = new THREE.Vector3()
+
+    expect(group.size).toBe(1)
+    group.setOffset({ x: 5, y: 30, z: -2 })
+
+    mesh.getMatrixAt(0, matrix)
+    position.setFromMatrixPosition(matrix)
+    expect(position.toArray()).toEqual([15, 34, 8])
+
+    mesh.getMatrixAt(1, matrix)
+    position.setFromMatrixPosition(matrix)
+    expect(position.toArray()).toEqual([20, 4, 20])
+    expect(wm.getBlocks()).toContainEqual(selected)
+
+    group.setOffset({ x: 0, y: 0, z: 0 })
+    mesh.getMatrixAt(0, matrix)
+    position.setFromMatrixPosition(matrix)
+    expect(position.toArray()).toEqual([10, 4, 10])
   })
 })
 

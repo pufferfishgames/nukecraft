@@ -3,6 +3,7 @@
   import * as THREE from 'three'
   import { createRenderer, createRemotePlayerManager } from './game/renderer.js'
   import { createKeyboardState, computeMovement, computeMovementAxes, KEYS } from './game/controls.js'
+  import { createAircraftRideController, isBoeing747RideBlock } from './game/aircraft.js'
   import { joystickAxes, touchLookDelta, JOYSTICK_RADIUS, TOUCH_SENSITIVITY } from './game/touch.js'
   import { applyGravity, applyJump, applyDescend, resolveGround, PLAYER_EYE_HEIGHT } from './game/physics.js'
   import { BlockType, BLOCK_COLORS } from './game/world.js'
@@ -31,6 +32,7 @@
   let overlay = true
   let worldManager = null
   let resetCamera = () => {}
+  let resetAircraftRide = () => {}
 
   let showNostr = false
   let passphraseInput
@@ -109,6 +111,7 @@
   async function applyMap(event) {
     const blocks = await decodeBlocks(event.content)
     worldManager.loadBlocks(blocks)
+    resetAircraftRide()
     setCurrentMapRef(createMapRef(event))
     resetCamera()
     closeNostr()
@@ -133,6 +136,7 @@
       const text = await file.text()
       const blocks = await decodeBlocks(text)
       worldManager.loadBlocks(blocks)
+      resetAircraftRide()
       setCurrentMapRef(createContentMapRef(text))
       resetCamera()
       uploadStatus = ''
@@ -225,11 +229,26 @@
     worldManager = result.worldManager
     const { renderer, scene, camera, resize, skyEnvironment } = result
     const remotePlayerManager = createRemotePlayerManager(scene)
+    const aircraftRide = createAircraftRideController()
+    let aircraftRenderGroup = null
     clearRemotePlayers = () => remotePlayerManager.setPlayers([])
     resize()
     window.addEventListener('resize', resize)
 
-    resetCamera = () => { camera.position.set(16, 12, 16) }
+    function rebuildAircraftRideGroup() {
+      aircraftRenderGroup?.reset()
+      aircraftRide.reset()
+      aircraftRenderGroup = worldManager.createRenderGroup(isBoeing747RideBlock)
+    }
+
+    resetAircraftRide = rebuildAircraftRideGroup
+    rebuildAircraftRideGroup()
+
+    resetCamera = () => {
+      aircraftRide.reset()
+      aircraftRenderGroup?.reset()
+      camera.position.set(16, 12, 16)
+    }
 
     document.addEventListener('pointerlockchange', () => {
       if (document.pointerLockElement !== canvas && !showNostr) overlay = true
@@ -380,6 +399,7 @@
     scene.add(ghostMesh)
 
     _breakBlock = () => {
+      if (aircraftRide.isActive()) return
       const hit = raycastTarget()
       if (!hit) return
       const block = worldManager.getBlockFromHit(hit)
@@ -388,6 +408,7 @@
     }
 
     _placeBlock = () => {
+      if (aircraftRide.isActive()) return
       const hit = raycastTarget()
       if (!hit) return
       const block = worldManager.getBlockFromHit(hit)
@@ -530,29 +551,46 @@
       const delta = Math.min((now - last) / 1000, 0.1)
       last = now
 
-      // Horizontal movement
-      const move = isMobile
-        ? computeMovementAxes(joystickDx, joystickDz, yaw, PLAYER_SPEED, delta)
-        : computeMovement(keyboard, yaw, PLAYER_SPEED, delta)
-      camera.position.x += move.x
-      camera.position.z += move.z
+      const rideGroundY = worldManager.getGroundY(camera.position.x, camera.position.z)
+      const rideFrame = aircraftRide.update({
+        delta,
+        position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+        groundY: rideGroundY,
+        isGrounded,
+      })
+      aircraftRenderGroup?.setOffset(rideFrame.offset)
 
-      // Vertical physics
-      velocityY = applyGravity(velocityY, delta)
+      if (rideFrame.active || rideFrame.started || rideFrame.ended) {
+        camera.position.x += rideFrame.deltaOffset.x
+        camera.position.y += rideFrame.deltaOffset.y
+        camera.position.z += rideFrame.deltaOffset.z
+        velocityY = 0
+        isGrounded = true
+      } else {
+        // Horizontal movement
+        const move = isMobile
+          ? computeMovementAxes(joystickDx, joystickDz, yaw, PLAYER_SPEED, delta)
+          : computeMovement(keyboard, yaw, PLAYER_SPEED, delta)
+        camera.position.x += move.x
+        camera.position.z += move.z
 
-      const wantsJump    = isMobile ? mobileJump    : keyboard.isDown(KEYS.JUMP)
-      const wantsDescend = isMobile ? mobileDescend : keyboard.isDown(KEYS.DESCEND)
-      if (wantsJump)    velocityY = applyJump(velocityY, isGrounded)
-      if (wantsDescend) velocityY = applyDescend(velocityY)
+        // Vertical physics
+        velocityY = applyGravity(velocityY, delta)
 
-      camera.position.y += velocityY * delta
-      camera.position.y  = Math.max(camera.position.y, -5) // void floor
+        const wantsJump    = isMobile ? mobileJump    : keyboard.isDown(KEYS.JUMP)
+        const wantsDescend = isMobile ? mobileDescend : keyboard.isDown(KEYS.DESCEND)
+        if (wantsJump)    velocityY = applyJump(velocityY, isGrounded)
+        if (wantsDescend) velocityY = applyDescend(velocityY)
 
-      const groundY  = worldManager.getGroundY(camera.position.x, camera.position.z)
-      const resolved = resolveGround(camera.position.y, velocityY, groundY)
-      camera.position.y = resolved.posY
-      velocityY  = resolved.velocityY
-      isGrounded = resolved.isGrounded
+        camera.position.y += velocityY * delta
+        camera.position.y  = Math.max(camera.position.y, -5) // void floor
+
+        const groundY  = worldManager.getGroundY(camera.position.x, camera.position.z)
+        const resolved = resolveGround(camera.position.y, velocityY, groundY)
+        camera.position.y = resolved.posY
+        velocityY  = resolved.velocityY
+        isGrounded = resolved.isGrounded
+      }
 
       // Nuke block plasma animation
       worldManager.animateNukeBlocks(now / 1000)
@@ -610,6 +648,7 @@
       remotePlayerManager.dispose()
       clearRemotePlayers = () => {}
       syncRemoteBlocks = () => {}
+      resetAircraftRide = () => {}
       skyEnvironment.dispose()
       renderer.dispose()
     }

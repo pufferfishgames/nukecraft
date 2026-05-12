@@ -21,7 +21,8 @@ Typical compression: 300k blocks → ~120 KB on wire.
 node scripts/generate-maya-map.js
 ```
 
-Publishes to relays. Load in-game: enter passphrase → **↻ Fetch** → **Load**.
+Publishes the Maya pyramids + Boeing 747 map to relays with passphrase `b747`.
+Load in-game: enter passphrase → **↻ Fetch** → **Load**.
 
 ## Block types
 

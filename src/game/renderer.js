@@ -655,6 +655,36 @@ export function createWorldManager(scene, initialBlocks) {
       return arr ? { ...arr[hit.instanceId] } : null
     },
 
+    createRenderGroup(predicate) {
+      const members = []
+      for (const [type, arr] of blockArrays) {
+        for (let idx = 0; idx < arr.length; idx++) {
+          const block = arr[idx]
+          if (predicate(block)) members.push({ type, idx, block })
+        }
+      }
+
+      return {
+        size: members.length,
+
+        setOffset(offset) {
+          const changedMeshes = new Set()
+          for (const { type, idx, block } of members) {
+            const arr = blockArrays.get(type)
+            const mesh = instMeshes.get(type)
+            if (!arr || !mesh || arr[idx] !== block) continue
+            setInstPos(mesh, idx, block.x + offset.x, block.y + offset.y, block.z + offset.z)
+            changedMeshes.add(mesh)
+          }
+          for (const mesh of changedMeshes) mesh.instanceMatrix.needsUpdate = true
+        },
+
+        reset() {
+          this.setOffset({ x: 0, y: 0, z: 0 })
+        },
+      }
+    },
+
     loadBlocks(newBlocks) {
       for (const mesh of instMeshes.values()) {
         scene.remove(mesh)
