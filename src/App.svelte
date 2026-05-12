@@ -186,7 +186,7 @@
 
     const result = createRenderer(canvas)
     worldManager = result.worldManager
-    const { renderer, scene, camera, resize } = result
+    const { renderer, scene, camera, resize, skyEnvironment } = result
     resize()
     window.addEventListener('resize', resize)
 
@@ -397,6 +397,7 @@
 
       // Nuke block plasma animation
       worldManager.animateNukeBlocks(now / 1000)
+      skyEnvironment.update(now / 1000)
 
       // Camera shake after explosion
       let shakeOffX = 0, shakeOffZ = 0
@@ -441,6 +442,7 @@
       highlightLine.material.dispose()
       ghostMesh.geometry.dispose()
       ghostMat.dispose()
+      skyEnvironment.dispose()
       renderer.dispose()
     }
   })
