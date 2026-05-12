@@ -417,6 +417,82 @@ export function createRenderer(canvas) {
   return { renderer, scene, camera, resize, worldManager, skyEnvironment }
 }
 
+export function createRemotePlayerManager(scene) {
+  const players = new Map()
+
+  function createAvatar(pubkey) {
+    const color = colorFromPubkey(pubkey)
+    const group = new THREE.Group()
+    group.name = `remote-player-${pubkey.slice(0, 8)}`
+
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(0.48, 0.9, 0.32),
+      new THREE.MeshStandardMaterial({ color, roughness: 0.82, metalness: 0.05 }),
+    )
+    body.position.y = -0.55
+    body.castShadow = true
+    group.add(body)
+
+    const head = new THREE.Mesh(
+      new THREE.BoxGeometry(0.36, 0.36, 0.36),
+      new THREE.MeshStandardMaterial({ color: 0xf0d0a8, roughness: 0.9 }),
+    )
+    head.position.y = 0.05
+    head.castShadow = true
+    group.add(head)
+
+    const visor = new THREE.Mesh(
+      new THREE.BoxGeometry(0.28, 0.08, 0.04),
+      new THREE.MeshBasicMaterial({ color: 0x111111 }),
+    )
+    visor.position.set(0, 0.08, -0.2)
+    group.add(visor)
+
+    const name = new THREE.Mesh(
+      new THREE.BoxGeometry(0.6, 0.05, 0.05),
+      new THREE.MeshBasicMaterial({ color }),
+    )
+    name.position.y = 0.45
+    group.add(name)
+
+    return group
+  }
+
+  function removeAvatar(pubkey) {
+    const avatar = players.get(pubkey)
+    if (!avatar) return
+    scene.remove(avatar)
+    disposeObject(avatar)
+    players.delete(pubkey)
+  }
+
+  return {
+    setPlayers(remotePlayers) {
+      const active = new Set()
+      for (const player of remotePlayers) {
+        active.add(player.pubkey)
+        let avatar = players.get(player.pubkey)
+        if (!avatar) {
+          avatar = createAvatar(player.pubkey)
+          players.set(player.pubkey, avatar)
+          scene.add(avatar)
+        }
+        avatar.position.set(player.x, player.y - 0.35, player.z)
+        avatar.rotation.y = player.yaw ?? 0
+        avatar.userData.player = player
+      }
+
+      for (const pubkey of players.keys()) {
+        if (!active.has(pubkey)) removeAvatar(pubkey)
+      }
+    },
+
+    dispose() {
+      for (const pubkey of [...players.keys()]) removeAvatar(pubkey)
+    },
+  }
+}
+
 const isSolid = (b) => b.type !== BlockType.WATER && b.type !== BlockType.AIR
 
 export function createWorldManager(scene, initialBlocks) {
@@ -576,3 +652,22 @@ export function createWorldManager(scene, initialBlocks) {
 }
 
 function posKey(b) { return `${b.x},${b.y},${b.z}` }
+
+function colorFromPubkey(pubkey) {
+  const seed = parseInt(pubkey.slice(0, 6), 16) || 0x00ff44
+  const hue = seed % 360
+  const color = new THREE.Color()
+  color.setHSL(hue / 360, 0.62, 0.52)
+  return color
+}
+
+function disposeObject(object) {
+  object.traverse((child) => {
+    child.geometry?.dispose?.()
+    if (Array.isArray(child.material)) {
+      for (const material of child.material) material.dispose?.()
+    } else {
+      child.material?.dispose?.()
+    }
+  })
+}

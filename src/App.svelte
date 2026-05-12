@@ -1,7 +1,7 @@
 <script>
   import { onMount, tick } from 'svelte'
   import * as THREE from 'three'
-  import { createRenderer } from './game/renderer.js'
+  import { createRenderer, createRemotePlayerManager } from './game/renderer.js'
   import { createKeyboardState, computeMovement, computeMovementAxes, KEYS } from './game/controls.js'
   import { joystickAxes, touchLookDelta, JOYSTICK_RADIUS, TOUCH_SENSITIVITY } from './game/touch.js'
   import { applyGravity, applyJump, applyDescend, resolveGround, PLAYER_EYE_HEIGHT } from './game/physics.js'
@@ -12,6 +12,13 @@
   import { mineEvent, MIN_POW_DIFFICULTY } from './nostr/pow.js'
   import { publishMap, fetchMaps } from './nostr/relay.js'
   import { encodeBlocks, decodeBlocks } from './nostr/codec.js'
+  import {
+    createContentMapRef,
+    createMapRef,
+    createPresenceEvent,
+    fetchPresence,
+    publishPresence,
+  } from './nostr/presence.js'
 
   const RELAY_URL = 'wss://nos.lol'
 
@@ -30,6 +37,12 @@
   let saveStatus = ''
   let remoteMaps = []
   let loadingMaps = false
+  let currentMapRef = 'default'
+  let remotePlayerCount = 0
+  let multiplayerStatus = ''
+  let presencePrivkey = ''
+  let presencePubkey = ''
+  let clearRemotePlayers = () => {}
 
   $: {
     const p = passphrase.trim()
@@ -66,6 +79,7 @@
       const mined = mineEvent(event, MIN_POW_DIFFICULTY)
       const signed = signEvent(mined, privkey)
       await publishMap(RELAY_URL, signed)
+      setCurrentMapRef(createMapRef(signed))
       saveStatus = 'saved'
       setTimeout(() => { saveStatus = '' }, 2000)
     } catch {
@@ -89,6 +103,7 @@
   async function applyMap(event) {
     const blocks = await decodeBlocks(event.content)
     worldManager.loadBlocks(blocks)
+    setCurrentMapRef(createMapRef(event))
     resetCamera()
     closeNostr()
   }
@@ -112,6 +127,7 @@
       const text = await file.text()
       const blocks = await decodeBlocks(text)
       worldManager.loadBlocks(blocks)
+      setCurrentMapRef(createContentMapRef(text))
       resetCamera()
       uploadStatus = ''
       e.target.value = ''
@@ -121,6 +137,18 @@
       e.target.value = ''
       setTimeout(() => { uploadStatus = '' }, 3000)
     }
+  }
+
+  function setCurrentMapRef(mapRef) {
+    currentMapRef = mapRef
+    remotePlayerCount = 0
+    clearRemotePlayers()
+  }
+
+  function makeRandomPassphrase() {
+    const bytes = new Uint8Array(16)
+    crypto.getRandomValues(bytes)
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
   }
   let selectedSlot = 0
   let isMobile = false
@@ -183,10 +211,14 @@
 
   onMount(() => {
     isMobile = window.matchMedia('(pointer: coarse)').matches
+    presencePrivkey = passphraseToPrivkey(`guest-${makeRandomPassphrase()}`)
+    presencePubkey = privkeyToPubkey(presencePrivkey)
 
     const result = createRenderer(canvas)
     worldManager = result.worldManager
     const { renderer, scene, camera, resize, skyEnvironment } = result
+    const remotePlayerManager = createRemotePlayerManager(scene)
+    clearRemotePlayers = () => remotePlayerManager.setPlayers([])
     resize()
     window.addEventListener('resize', resize)
 
@@ -205,6 +237,60 @@
     let velocityY  = 0
     let isGrounded = false
     let shakeTime  = 0
+    let fetchingPresence = false
+    let publishingPresence = false
+
+    async function fetchRemotePlayers() {
+      if (fetchingPresence) return
+      fetchingPresence = true
+      const mapRef = currentMapRef
+      try {
+        const players = await fetchPresence(RELAY_URL, mapRef, { selfPubkey: presencePubkey })
+        if (mapRef !== currentMapRef) return
+        remotePlayerManager.setPlayers(players)
+        remotePlayerCount = players.length
+        multiplayerStatus = presencePubkey ? 'online' : 'watching'
+      } catch {
+        if (mapRef === currentMapRef) {
+          remotePlayerManager.setPlayers([])
+          remotePlayerCount = 0
+          multiplayerStatus = 'offline'
+        }
+      } finally {
+        fetchingPresence = false
+      }
+    }
+
+    async function publishLocalPresence() {
+      if (publishingPresence || !presencePrivkey || !presencePubkey) {
+        multiplayerStatus = 'watching'
+        return
+      }
+      publishingPresence = true
+      try {
+        const event = createPresenceEvent(presencePubkey, currentMapRef, {
+          x: camera.position.x,
+          y: camera.position.y,
+          z: camera.position.z,
+          yaw,
+          pitch,
+          name: presencePubkey.slice(0, 8),
+        })
+        const signed = signEvent(event, presencePrivkey)
+        const result = await publishPresence(RELAY_URL, signed)
+        if (result.type === 'OK' && !result.accepted) throw new Error(result.message)
+        multiplayerStatus = 'online'
+      } catch {
+        multiplayerStatus = 'offline'
+      } finally {
+        publishingPresence = false
+      }
+    }
+
+    const fetchPresenceTimer = window.setInterval(fetchRemotePlayers, 3000)
+    const publishPresenceTimer = window.setInterval(publishLocalPresence, 3000)
+    const initialFetchPresence = window.setTimeout(fetchRemotePlayers, 800)
+    const initialPublishPresence = window.setTimeout(publishLocalPresence, 1600)
 
     // ── Raycast helpers ──────────────────────────────────────────────────────
     function raycastTarget() {
@@ -438,10 +524,16 @@
       window.removeEventListener('resize', resize)
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', keyboard.onKeyUp)
+      window.clearInterval(fetchPresenceTimer)
+      window.clearInterval(publishPresenceTimer)
+      window.clearTimeout(initialFetchPresence)
+      window.clearTimeout(initialPublishPresence)
       highlightLine.geometry.dispose()
       highlightLine.material.dispose()
       ghostMesh.geometry.dispose()
       ghostMat.dispose()
+      remotePlayerManager.dispose()
+      clearRemotePlayers = () => {}
       skyEnvironment.dispose()
       renderer.dispose()
     }
@@ -484,6 +576,11 @@
 
 {#if !overlay}
   <div class="crosshair" aria-hidden="true">+</div>
+
+  <div class="players-hud" title={currentMapRef}>
+    <span class:online={multiplayerStatus === 'online'}></span>
+    Players {remotePlayerCount + (presencePubkey ? 1 : 0)}
+  </div>
 
   <div class="hotbar">
     {#each HOTBAR as item, i}
@@ -546,8 +643,9 @@
       <button onclick={closeNostr} class="close-btn">×</button>
     </div>
     <div class="nostr-body">
-      <label class="field-label">Passphrase</label>
+      <label class="field-label" for="nostr-passphrase">Passphrase</label>
       <input
+        id="nostr-passphrase"
         type="password"
         class="passphrase-input"
         bind:this={passphraseInput}
@@ -570,6 +668,7 @@
       {:else}
         <div class="pubkey-hint">Enter passphrase to enable saving</div>
       {/if}
+      <div class="pubkey-hint">players on this map: {remotePlayerCount + (presencePubkey ? 1 : 0)} · {multiplayerStatus || 'watching'}</div>
       <button
         onclick={() => fileInput.click()}
         disabled={uploadStatus === 'loading'}
@@ -692,6 +791,35 @@
     text-shadow: 1px 1px 2px #000;
     pointer-events: none;
     user-select: none;
+  }
+
+  .players-hud {
+    position: fixed;
+    top: 14px;
+    right: 14px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 9px;
+    background: rgba(0, 0, 0, 0.48);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 4px;
+    color: rgba(255, 255, 255, 0.82);
+    font-size: 0.75rem;
+    pointer-events: none;
+    user-select: none;
+  }
+
+  .players-hud span {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #777;
+  }
+
+  .players-hud span.online {
+    background: #00ff44;
+    box-shadow: 0 0 8px rgba(0, 255, 68, 0.8);
   }
 
   .hotbar {

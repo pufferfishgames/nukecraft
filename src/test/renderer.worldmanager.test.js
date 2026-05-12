@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from 'vitest'
-import { createWorldManager } from '../game/renderer.js'
+import { createRemotePlayerManager, createWorldManager } from '../game/renderer.js'
 import { BlockType } from '../game/world.js'
 
 function makeScene() {
@@ -158,5 +158,36 @@ describe('createWorldManager loadBlocks', () => {
     const wm = createWorldManager(scene, [])
     wm.loadBlocks([b(100, 0, 100, BlockType.SAND)])
     expect(scene.meshes.every(m => m.frustumCulled === false)).toBe(true)
+  })
+})
+
+describe('createRemotePlayerManager', () => {
+  it('adds, updates, and removes remote player avatars by pubkey', () => {
+    const scene = makeScene()
+    const manager = createRemotePlayerManager(scene)
+
+    manager.setPlayers([{ pubkey: 'a'.repeat(64), x: 1, y: 2, z: 3, yaw: 0 }])
+    expect(scene.meshes).toHaveLength(1)
+    expect(scene.meshes[0].position.x).toBe(1)
+
+    manager.setPlayers([{ pubkey: 'a'.repeat(64), x: 4, y: 5, z: 6, yaw: 1 }])
+    expect(scene.meshes).toHaveLength(1)
+    expect(scene.meshes[0].position.x).toBe(4)
+    expect(scene.meshes[0].rotation.y).toBe(1)
+
+    manager.setPlayers([])
+    expect(scene.meshes).toHaveLength(0)
+  })
+
+  it('dispose removes all remote player avatars', () => {
+    const scene = makeScene()
+    const manager = createRemotePlayerManager(scene)
+    manager.setPlayers([
+      { pubkey: 'a'.repeat(64), x: 1, y: 2, z: 3, yaw: 0 },
+      { pubkey: 'b'.repeat(64), x: 2, y: 3, z: 4, yaw: 0 },
+    ])
+
+    manager.dispose()
+    expect(scene.meshes).toHaveLength(0)
   })
 })
