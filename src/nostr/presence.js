@@ -11,7 +11,7 @@ export function createMapRef(event) {
   const dTag = event?.tags?.find((tag) => tag[0] === 'd')?.[1]
   if (event?.kind && event?.pubkey && dTag) return `${event.kind}:${event.pubkey}:${dTag}`
   if (event?.id) return `event:${event.id}`
-  return 'builtin:default'
+  return 'default'
 }
 
 export function createContentMapRef(content) {

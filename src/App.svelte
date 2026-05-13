@@ -19,6 +19,11 @@
     fetchPresence,
     publishPresence,
   } from './nostr/presence.js'
+  import {
+    createBlockEditEvent,
+    fetchBlockEdits,
+    publishBlockEdit,
+  } from './nostr/blocks.js'
 
   const RELAY_URL = 'wss://nos.lol'
 
@@ -43,6 +48,7 @@
   let presencePrivkey = ''
   let presencePubkey = ''
   let clearRemotePlayers = () => {}
+  let syncRemoteBlocks = () => {}
 
   $: {
     const p = passphrase.trim()
@@ -143,6 +149,7 @@
     currentMapRef = mapRef
     remotePlayerCount = 0
     clearRemotePlayers()
+    syncRemoteBlocks()
   }
 
   function makeRandomPassphrase() {
@@ -239,6 +246,9 @@
     let shakeTime  = 0
     let fetchingPresence = false
     let publishingPresence = false
+    let fetchingBlockEdits = false
+    let publishingBlockEdits = false
+    const pendingBlockEditBatches = []
 
     async function fetchRemotePlayers() {
       if (fetchingPresence) return
@@ -287,10 +297,64 @@
       }
     }
 
+    function applyBlockEdits(edits) {
+      for (const edit of edits) {
+        if (edit.op === 'add') {
+          worldManager.removeBlock(edit)
+          worldManager.addBlock({ x: edit.x, y: edit.y, z: edit.z, type: edit.type })
+        } else if (edit.op === 'remove') {
+          worldManager.removeBlock(edit)
+        }
+      }
+    }
+
+    async function fetchRemoteBlockEdits() {
+      if (fetchingBlockEdits) return
+      fetchingBlockEdits = true
+      const mapRef = currentMapRef
+      try {
+        const edits = await fetchBlockEdits(RELAY_URL, mapRef)
+        if (mapRef !== currentMapRef) return
+        applyBlockEdits(edits)
+      } catch {
+        // Keep local world responsive if the relay is temporarily unreachable.
+      } finally {
+        fetchingBlockEdits = false
+      }
+    }
+
+    async function publishQueuedBlockEdits() {
+      if (publishingBlockEdits || pendingBlockEditBatches.length === 0 || !presencePrivkey || !presencePubkey) return
+      publishingBlockEdits = true
+      try {
+        while (pendingBlockEditBatches.length > 0) {
+          const { mapRef, edits } = pendingBlockEditBatches.shift()
+          const event = createBlockEditEvent(presencePubkey, mapRef, edits)
+          const signed = signEvent(event, presencePrivkey)
+          const result = await publishBlockEdit(RELAY_URL, signed)
+          if (result.type === 'OK' && !result.accepted) throw new Error(result.message)
+        }
+      } catch {
+        // Drop failed edit batches; the local action still happened immediately.
+      } finally {
+        publishingBlockEdits = false
+      }
+    }
+
+    function publishLocalBlockEdits(edits) {
+      const batch = Array.isArray(edits) ? edits : [edits]
+      if (batch.length === 0) return
+      pendingBlockEditBatches.push({ mapRef: currentMapRef, edits: batch })
+      publishQueuedBlockEdits()
+    }
+
     const fetchPresenceTimer = window.setInterval(fetchRemotePlayers, 3000)
     const publishPresenceTimer = window.setInterval(publishLocalPresence, 3000)
+    const fetchBlockEditsTimer = window.setInterval(fetchRemoteBlockEdits, 2000)
     const initialFetchPresence = window.setTimeout(fetchRemotePlayers, 800)
     const initialPublishPresence = window.setTimeout(publishLocalPresence, 1600)
+    const initialFetchBlockEdits = window.setTimeout(fetchRemoteBlockEdits, 1200)
+    syncRemoteBlocks = fetchRemoteBlockEdits
 
     // ── Raycast helpers ──────────────────────────────────────────────────────
     function raycastTarget() {
@@ -320,7 +384,7 @@
       if (!hit) return
       const block = worldManager.getBlockFromHit(hit)
       if (!block || block.type === BlockType.WATER) return
-      worldManager.removeBlock(block)
+      if (worldManager.removeBlock(block)) publishLocalBlockEdits({ op: 'remove', x: block.x, y: block.y, z: block.z })
     }
 
     _placeBlock = () => {
@@ -335,16 +399,25 @@
         z: block.z + Math.round(n.z),
         type: HOTBAR[selectedSlot].type,
       }
-      worldManager.addBlock(newBlock)
+      if (!worldManager.addBlock(newBlock)) return
+      let exploded = false
       if (newBlock.type === BlockType.NUKE) {
         const count = countConnectedNuke(newBlock, (x, y, z) => worldManager.hasNukeAt(x, y, z))
-        if (count > NUKE_CHAIN_LIMIT) triggerExplosion(newBlock)
+        if (count > NUKE_CHAIN_LIMIT) {
+          triggerExplosion(newBlock)
+          exploded = true
+        }
       }
+      if (!exploded) publishLocalBlockEdits({ op: 'add', ...newBlock })
     }
 
     function triggerExplosion(center) {
       const positions = explosionPositions(center.x, center.y, center.z, EXPLOSION_RADIUS)
-      for (const pos of positions) worldManager.removeBlock(pos)
+      const removed = []
+      for (const pos of positions) {
+        if (worldManager.removeBlock(pos)) removed.push({ op: 'remove', x: pos.x, y: pos.y, z: pos.z })
+      }
+      publishLocalBlockEdits(removed)
       exploding = true
       setTimeout(() => { exploding = false }, 500)
       shakeTime = SHAKE_DURATION
@@ -526,14 +599,17 @@
       window.removeEventListener('keyup', keyboard.onKeyUp)
       window.clearInterval(fetchPresenceTimer)
       window.clearInterval(publishPresenceTimer)
+      window.clearInterval(fetchBlockEditsTimer)
       window.clearTimeout(initialFetchPresence)
       window.clearTimeout(initialPublishPresence)
+      window.clearTimeout(initialFetchBlockEdits)
       highlightLine.geometry.dispose()
       highlightLine.material.dispose()
       ghostMesh.geometry.dispose()
       ghostMat.dispose()
       remotePlayerManager.dispose()
       clearRemotePlayers = () => {}
+      syncRemoteBlocks = () => {}
       skyEnvironment.dispose()
       renderer.dispose()
     }

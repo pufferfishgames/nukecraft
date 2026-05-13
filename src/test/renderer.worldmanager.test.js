@@ -36,14 +36,14 @@ describe('createWorldManager addBlock', () => {
   it('block appears in getBlocks after addBlock', () => {
     const scene = makeScene()
     const wm = createWorldManager(scene, [])
-    wm.addBlock(b(1, 0, 1, BlockType.STONE))
+    expect(wm.addBlock(b(1, 0, 1, BlockType.STONE))).toBe(true)
     expect(wm.getBlocks()).toContainEqual(b(1, 0, 1, BlockType.STONE))
   })
 
   it('addBlock on occupied position is a no-op', () => {
     const scene = makeScene()
     const wm = createWorldManager(scene, [b(0, 0, 0, BlockType.GRASS)])
-    wm.addBlock(b(0, 0, 0, BlockType.DIRT))
+    expect(wm.addBlock(b(0, 0, 0, BlockType.DIRT))).toBe(false)
     const at = wm.getBlocks().filter(bl => bl.x === 0 && bl.y === 0 && bl.z === 0)
     expect(at).toHaveLength(1)
     expect(at[0].type).toBe(BlockType.GRASS)
@@ -63,7 +63,7 @@ describe('createWorldManager removeBlock', () => {
   it('block disappears from getBlocks after removeBlock', () => {
     const scene = makeScene()
     const wm = createWorldManager(scene, [b(0, 0, 0, BlockType.GRASS), b(1, 0, 0, BlockType.STONE)])
-    wm.removeBlock({ x: 0, y: 0, z: 0 })
+    expect(wm.removeBlock({ x: 0, y: 0, z: 0 })).toBe(true)
     expect(wm.getBlocks().some(bl => bl.x === 0)).toBe(false)
     expect(wm.getBlocks().some(bl => bl.x === 1)).toBe(true)
   })
@@ -71,7 +71,7 @@ describe('createWorldManager removeBlock', () => {
   it('removeBlock on missing position is a no-op', () => {
     const scene = makeScene()
     const wm = createWorldManager(scene, [b(0, 0, 0, BlockType.GRASS)])
-    expect(() => wm.removeBlock({ x: 9, y: 9, z: 9 })).not.toThrow()
+    expect(wm.removeBlock({ x: 9, y: 9, z: 9 })).toBe(false)
     expect(wm.getBlocks()).toHaveLength(1)
   })
 

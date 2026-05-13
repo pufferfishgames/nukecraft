@@ -689,7 +689,7 @@ export function createWorldManager(scene, initialBlocks) {
 
     addBlock(block) {
       const k = posKey(block)
-      if (indexMap.has(k)) return
+      if (indexMap.has(k)) return false
       _ensureType(block.type)
       const arr = blockArrays.get(block.type)
       if (arr.length >= instMeshes.get(block.type).userData.maxCount) _growMesh(block.type)
@@ -704,12 +704,13 @@ export function createWorldManager(scene, initialBlocks) {
         const cur = colMap.get(colKey(block)) ?? -Infinity
         if (block.y > cur) colMap.set(colKey(block), block.y)
       }
+      return true
     },
 
     removeBlock(pos) {
       const k = posKey(pos)
       const entry = indexMap.get(k)
-      if (!entry) return
+      if (!entry) return false
       const { type, idx } = entry
       const arr = blockArrays.get(type)
       const mesh = instMeshes.get(type)
@@ -725,6 +726,7 @@ export function createWorldManager(scene, initialBlocks) {
       mesh.count = arr.length
       mesh.instanceMatrix.needsUpdate = true
       if (isSolid(pos)) rebuildColumn(pos.x, pos.z)
+      return true
     },
   }
 }
