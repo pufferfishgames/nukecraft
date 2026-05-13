@@ -373,7 +373,7 @@ export function createSkyEnvironment(scene) {
       if (jet.visible) {
         const progress = flybyTime / JET_FLYBY_DURATION
         jet.position.set(-88 + progress * 176, 28.5 + Math.sin(time * 0.8) * 0.7, -30 + Math.sin(time * 0.18) * 9)
-        jet.rotation.set(0, Math.PI / 2 + Math.sin(time * 0.12) * 0.08, 0)
+        jet.rotation.set(0, Math.sin(time * 0.12) * 0.08, 0)
       }
     },
     dispose() {

@@ -95,4 +95,16 @@ describe('sky environment', () => {
     sky.update(24)
     expect(jet.visible).toBe(false)
   })
+
+  it('flies the jet nose-first (rotation.y near 0, not PI/2)', () => {
+    const scene = new THREE.Scene()
+    const sky = createSkyEnvironment(scene)
+    const jet = scene.getObjectByName('boeing-747')
+
+    sky.update(8)
+
+    expect(jet.visible).toBe(true)
+    // nose is at local +X, plane travels world +X — yaw must stay near 0, not 90°
+    expect(Math.abs(jet.rotation.y)).toBeLessThan(0.2)
+  })
 })
