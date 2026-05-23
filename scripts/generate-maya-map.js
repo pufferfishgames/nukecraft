@@ -12,6 +12,7 @@ import { buildPublishMessage, parseRelayMessage } from '../src/nostr/relay.js'
 import { encodeBlocks } from '../src/nostr/codec.js'
 
 export const PASSPHRASE = 'b747'
+export const MAP_LABEL = 'Maya B747 Takeoff'
 export const MAP_FILE = 'maps/b747-maya-747.json'
 export const RELAYS = [
   'wss://nos.lol',
@@ -343,7 +344,7 @@ export async function buildSignedMapEvent({ passphrase = PASSPHRASE, createdAt =
   const pubkey = privkeyToPubkey(privkey)
   const blocks = generateMap()
   const content = await encodeBlocks(blocks)
-  const baseEvent = createMapEvent(pubkey, content)
+  const baseEvent = createMapEvent(pubkey, content, { label: MAP_LABEL })
   const mined = mineEvent({ ...baseEvent, created_at: createdAt }, MIN_POW_DIFFICULTY)
   const signed = signEvent(mined, privkey)
   if (!meetsPoW(signed.id, MIN_POW_DIFFICULTY)) throw new Error('mined event does not meet PoW')

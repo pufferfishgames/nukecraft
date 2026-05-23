@@ -1,8 +1,9 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest'
 import { decodeBlocks, encodeBlocks } from '../nostr/codec.js'
+import { normalizeMapLabel } from '../nostr/events.js'
 import { BlockType } from '../game/world.js'
-import { FEATURE_AREAS, generateMap } from '../../scripts/generate-machu-picchu-map.js'
+import { FEATURE_AREAS, MAP_LABEL, generateMap } from '../../scripts/generate-machu-picchu-map.js'
 
 function inArea(block, area) {
   return block.x >= area.x0 && block.x <= area.x1 && block.z >= area.z0 && block.z <= area.z1
@@ -22,6 +23,10 @@ function maxY(blocks) {
 
 describe('generateMap Machu Picchu adventure map', () => {
   const blocks = generateMap()
+
+  it('has a 20 character Nostr map label', () => {
+    expect(normalizeMapLabel(MAP_LABEL)).toHaveLength(20)
+  })
 
   it('contains no duplicate block positions', () => {
     const keys = blocks.map((block) => `${block.x},${block.y},${block.z}`)

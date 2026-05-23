@@ -1,6 +1,14 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest'
-import { createMapEvent, serializeEvent, getEventId, signEvent } from '../nostr/events.js'
+import {
+  MAP_LABEL_LENGTH,
+  createMapEvent,
+  getEventId,
+  getMapLabel,
+  normalizeMapLabel,
+  serializeEvent,
+  signEvent,
+} from '../nostr/events.js'
 import { passphraseToPrivkey, privkeyToPubkey } from '../nostr/identity.js'
 
 const privkey = passphraseToPrivkey('test passphrase')
@@ -21,6 +29,13 @@ describe('createMapEvent', () => {
     expect(event.tags).toContainEqual(['d', 'pufferfishgames/nukecraft'])
   })
 
+  it('adds a 20 character label tag to every map event', () => {
+    const event = createMapEvent(pubkey, content, { label: 'Desert Run' })
+    const label = event.tags.find((tag) => tag[0] === 'label')?.[1]
+    expect(label).toBe(normalizeMapLabel('Desert Run'))
+    expect(label).toHaveLength(MAP_LABEL_LENGTH)
+  })
+
   it('stores content string as-is', () => {
     const event = createMapEvent(pubkey, content)
     expect(event.content).toBe(content)
@@ -30,6 +45,26 @@ describe('createMapEvent', () => {
     const before = Math.floor(Date.now() / 1000) - 1
     const event = createMapEvent(pubkey, content)
     expect(event.created_at).toBeGreaterThan(before)
+  })
+})
+
+describe('map labels', () => {
+  it('normalizes labels to exactly 20 characters', () => {
+    expect(normalizeMapLabel('  a   tracked   map  ')).toBe('a tracked map       ')
+    expect(normalizeMapLabel('12345678901234567890xyz')).toBe('12345678901234567890')
+    expect(normalizeMapLabel('')).toHaveLength(MAP_LABEL_LENGTH)
+  })
+
+  it('reads label, title, and name tags as map labels', () => {
+    expect(getMapLabel({ tags: [['label', 'Maya B747']] })).toBe(normalizeMapLabel('Maya B747'))
+    expect(getMapLabel({ tags: [['title', 'Sky city']] })).toBe(normalizeMapLabel('Sky city'))
+    expect(getMapLabel({ tags: [['name', 'Village']] })).toBe(normalizeMapLabel('Village'))
+  })
+
+  it('creates a 20 character fallback for unlabeled legacy maps', () => {
+    const id = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+    expect(getMapLabel({ id, tags: [] })).toBe('Map 0123456789abcdef')
+    expect(getMapLabel({ id, tags: [] })).toHaveLength(MAP_LABEL_LENGTH)
   })
 })
 

@@ -2,7 +2,8 @@
 import { describe, it, expect } from 'vitest'
 import { decodeBlocks, encodeBlocks } from '../nostr/codec.js'
 import { BlockType } from '../game/world.js'
-import { FEATURE_AREAS, PASSPHRASE, generateMap } from '../../scripts/generate-maya-map.js'
+import { normalizeMapLabel } from '../nostr/events.js'
+import { FEATURE_AREAS, MAP_LABEL, PASSPHRASE, generateMap } from '../../scripts/generate-maya-map.js'
 
 function inArea(block, area) {
   return block.x >= area.x0 && block.x <= area.x1 && block.z >= area.z0 && block.z <= area.z1
@@ -30,6 +31,10 @@ describe('generateMap Maya b747 map', () => {
 
   it('publishes under the requested b747 passphrase', () => {
     expect(PASSPHRASE).toBe('b747')
+  })
+
+  it('has a 20 character Nostr map label', () => {
+    expect(normalizeMapLabel(MAP_LABEL)).toHaveLength(20)
   })
 
   it('contains no duplicate block positions', () => {

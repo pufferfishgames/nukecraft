@@ -9,7 +9,7 @@
   import { BlockType, BLOCK_COLORS } from './game/world.js'
   import { countConnectedNuke, explosionPositions, NUKE_CHAIN_LIMIT, EXPLOSION_RADIUS } from './game/nuke.js'
   import { passphraseToPrivkey, privkeyToPubkey } from './nostr/identity.js'
-  import { createMapEvent, signEvent } from './nostr/events.js'
+  import { MAP_LABEL_LENGTH, createMapEvent, getMapLabel, signEvent } from './nostr/events.js'
   import { mineEvent, MIN_POW_DIFFICULTY } from './nostr/pow.js'
   import { publishMap, fetchMaps } from './nostr/relay.js'
   import { encodeBlocks, decodeBlocks } from './nostr/codec.js'
@@ -39,6 +39,7 @@
   let fileInput
   let uploadStatus = ''
   let passphrase = ''
+  let mapLabel = ''
   let privkey = ''
   let pubkey = ''
   let saveStatus = ''
@@ -83,7 +84,7 @@
     try {
       const blocks = worldManager.getBlocks()
       const content = await encodeBlocks(blocks)
-      const event = createMapEvent(pubkey, content)
+      const event = createMapEvent(pubkey, content, { label: mapLabel })
       const mined = mineEvent(event, MIN_POW_DIFFICULTY)
       const signed = signEvent(mined, privkey)
       await publishMap(RELAY_URL, signed)
@@ -154,6 +155,10 @@
     remotePlayerCount = 0
     clearRemotePlayers()
     syncRemoteBlocks()
+  }
+
+  function displayMapLabel(map) {
+    return map.label ?? getMapLabel(map)
   }
 
   function makeRandomPassphrase() {
@@ -768,6 +773,16 @@
         placeholder="Your secret passphrase"
         autocomplete="off"
       />
+      <label class="field-label" for="nostr-map-label">Map label</label>
+      <input
+        id="nostr-map-label"
+        type="text"
+        class="passphrase-input"
+        bind:value={mapLabel}
+        maxlength={MAP_LABEL_LENGTH}
+        placeholder="Nukecraft map"
+        autocomplete="off"
+      />
       <input
         type="file"
         accept=".json"
@@ -801,6 +816,7 @@
           <div class="maps-list">
             {#each remoteMaps as map}
               <div class="map-row" class:own={map.pubkey === pubkey}>
+                <span class="map-label" title={displayMapLabel(map)}>{displayMapLabel(map)}</span>
                 <span class="map-author">
                   {#if map.pubkey === pubkey}★ you{:else}{map.pubkey.slice(0, 10)}…{/if}
                 </span>
@@ -1216,8 +1232,19 @@
     background: rgba(0, 255, 68, 0.05);
   }
 
+  .map-label {
+    flex: 0 0 20ch;
+    max-width: 20ch;
+    overflow: hidden;
+    color: #e6edf3;
+    font-family: monospace;
+    font-size: 0.76rem;
+    white-space: pre;
+  }
+
   .map-author {
     flex: 1;
+    min-width: 0;
     font-size: 0.78rem;
     color: #aaa;
     overflow: hidden;

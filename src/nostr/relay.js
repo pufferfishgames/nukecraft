@@ -1,4 +1,5 @@
 import { meetsPoW } from './pow.js'
+import { getMapLabel } from './events.js'
 
 export function buildPublishMessage(event) {
   return JSON.stringify(['EVENT', event])
@@ -32,6 +33,10 @@ export function filterByPoW(events, difficulty) {
   return events.filter((e) => meetsPoW(e.id, difficulty))
 }
 
+export function withMapLabel(event) {
+  return { ...event, label: getMapLabel(event) }
+}
+
 export async function publishMap(relayUrl, event) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(relayUrl)
@@ -55,7 +60,7 @@ export async function fetchMaps(relayUrl, difficulty = MIN_POW_DIFFICULTY) {
     ws.onmessage = (e) => {
       const msg = parseRelayMessage(e.data)
       if (msg.type === 'EVENT' && meetsPoW(msg.event.id, difficulty)) {
-        events.push(msg.event)
+        events.push(withMapLabel(msg.event))
       } else if (msg.type === 'EOSE') {
         ws.close()
         resolve(events)

@@ -4,6 +4,7 @@
 **Relay**: `wss://nos.lol` (primary; damus.io + relay.nostr.band as fallback).  
 **Identity**: passphrase → SHA256 → secp256k1 private key → public key (BIP-340 x-only).  
 **Replaceable**: same pubkey + d-tag = one canonical map per user (cross-device sync).
+**Label**: map events include a public `["label","<20 chars>"]` tag. Older unlabeled maps get a 20-character fallback label in-game.
 
 ## Content encoding
 

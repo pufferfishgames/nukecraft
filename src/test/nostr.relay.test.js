@@ -5,7 +5,9 @@ import {
   buildSubscribeMessage,
   parseRelayMessage,
   filterByPoW,
+  withMapLabel,
 } from '../nostr/relay.js'
+import { normalizeMapLabel } from '../nostr/events.js'
 
 describe('buildPublishMessage', () => {
   it('wraps event in ["EVENT", event]', () => {
@@ -81,5 +83,25 @@ describe('filterByPoW', () => {
   it('difficulty 0 passes everything', () => {
     const events = [{ id: 'ff'.repeat(32) }]
     expect(filterByPoW(events, 0)).toHaveLength(1)
+  })
+})
+
+describe('withMapLabel', () => {
+  it('adds the event label for display', () => {
+    const event = {
+      id: '00' + 'f'.repeat(62),
+      tags: [['label', 'Maya B747 Takeoff']],
+    }
+    expect(withMapLabel(event)).toMatchObject({
+      label: normalizeMapLabel('Maya B747 Takeoff'),
+    })
+  })
+
+  it('adds a fallback label to legacy unlabeled maps', () => {
+    const event = {
+      id: '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff',
+      tags: [],
+    }
+    expect(withMapLabel(event).label).toBe('Map 0011223344556677')
   })
 })
