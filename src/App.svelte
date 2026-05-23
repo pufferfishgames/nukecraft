@@ -3,9 +3,14 @@
   import * as THREE from 'three'
   import { createRenderer, createRemotePlayerManager } from './game/renderer.js'
   import { createKeyboardState, computeMovement, computeMovementAxes, KEYS } from './game/controls.js'
-  import { createAircraftRideController, isBoeing747RideBlock } from './game/aircraft.js'
+  import {
+    createAircraftRideController,
+    getAircraftRideGroundY,
+    isBoeing747RideBlock,
+    isBoeing747RideGround,
+  } from './game/aircraft.js'
   import { joystickAxes, touchLookDelta, JOYSTICK_RADIUS, TOUCH_SENSITIVITY } from './game/touch.js'
-  import { applyGravity, applyJump, applyDescend, resolveGround, PLAYER_EYE_HEIGHT } from './game/physics.js'
+  import { stepPlayerMotion } from './game/player.js'
   import { BlockType, BLOCK_COLORS } from './game/world.js'
   import { countConnectedNuke, explosionPositions, NUKE_CHAIN_LIMIT, EXPLOSION_RADIUS } from './game/nuke.js'
   import { passphraseToPrivkey, privkeyToPubkey } from './nostr/identity.js'
@@ -267,6 +272,8 @@
     // Physics state (frame-local, not reactive)
     let velocityY  = 0
     let isGrounded = false
+    let isGroundedOnAircraft = false
+    let aircraftRideOffset = { x: 0, y: 0, z: 0 }
     let shakeTime  = 0
     let fetchingPresence = false
     let publishingPresence = false
@@ -563,39 +570,39 @@
         groundY: rideGroundY,
         isGrounded,
       })
-      aircraftRenderGroup?.setOffset(rideFrame.offset)
+      aircraftRideOffset = rideFrame.offset
+      aircraftRenderGroup?.setOffset(aircraftRideOffset)
 
-      if (rideFrame.active || rideFrame.started || rideFrame.ended) {
-        camera.position.x += rideFrame.deltaOffset.x
-        camera.position.y += rideFrame.deltaOffset.y
-        camera.position.z += rideFrame.deltaOffset.z
-        velocityY = 0
-        isGrounded = true
-      } else {
-        // Horizontal movement
-        const move = isMobile
-          ? computeMovementAxes(joystickDx, joystickDz, yaw, PLAYER_SPEED, delta)
-          : computeMovement(keyboard, yaw, PLAYER_SPEED, delta)
-        camera.position.x += move.x
-        camera.position.z += move.z
+      const rideMoving = rideFrame.active || rideFrame.started || rideFrame.ended
+      const move = isMobile
+        ? computeMovementAxes(joystickDx, joystickDz, yaw, PLAYER_SPEED, delta)
+        : computeMovement(keyboard, yaw, PLAYER_SPEED, delta)
+      const wantsJump    = isMobile ? mobileJump    : keyboard.isDown(KEYS.JUMP)
+      const wantsDescend = isMobile ? mobileDescend : keyboard.isDown(KEYS.DESCEND)
+      const getGroundY = (x, z) => worldManager.getGroundY(x, z)
+      const stepped = stepPlayerMotion({
+        position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+        velocityY,
+        isGrounded,
+        isGroundedOnPlatform: rideMoving && isGroundedOnAircraft,
+        platformDelta: rideFrame.deltaOffset,
+        move,
+        delta,
+        wantsJump,
+        wantsDescend,
+        getStaticGroundY: (x, z) => {
+          const groundY = worldManager.getGroundY(x, z)
+          return rideMoving && isBoeing747RideGround({ x, z, groundY }) ? -Infinity : groundY
+        },
+        getPlatformGroundY: (x, z) => rideMoving
+          ? getAircraftRideGroundY({ x, z, offset: aircraftRideOffset, getGroundY })
+          : -Infinity,
+      })
 
-        // Vertical physics
-        velocityY = applyGravity(velocityY, delta)
-
-        const wantsJump    = isMobile ? mobileJump    : keyboard.isDown(KEYS.JUMP)
-        const wantsDescend = isMobile ? mobileDescend : keyboard.isDown(KEYS.DESCEND)
-        if (wantsJump)    velocityY = applyJump(velocityY, isGrounded)
-        if (wantsDescend) velocityY = applyDescend(velocityY)
-
-        camera.position.y += velocityY * delta
-        camera.position.y  = Math.max(camera.position.y, -5) // void floor
-
-        const groundY  = worldManager.getGroundY(camera.position.x, camera.position.z)
-        const resolved = resolveGround(camera.position.y, velocityY, groundY)
-        camera.position.y = resolved.posY
-        velocityY  = resolved.velocityY
-        isGrounded = resolved.isGrounded
-      }
+      camera.position.set(stepped.position.x, stepped.position.y, stepped.position.z)
+      velocityY = stepped.velocityY
+      isGrounded = stepped.isGrounded
+      isGroundedOnAircraft = stepped.isGroundedOnPlatform
 
       // Nuke block plasma animation
       worldManager.animateNukeBlocks(now / 1000)

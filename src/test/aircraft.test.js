@@ -3,8 +3,10 @@ import { describe, it, expect } from 'vitest'
 import {
   BOEING_747_RIDE,
   createAircraftRideController,
+  getAircraftRideGroundY,
   getAircraftFlightOffset,
   isBoeing747RideBlock,
+  isBoeing747RideGround,
   isOnBoeing747Ride,
 } from '../game/aircraft.js'
 import { BlockType } from '../game/world.js'
@@ -40,6 +42,33 @@ describe('Boeing 747 ride detection', () => {
     expect(isBoeing747RideBlock({ x: 166, y: 10, z: 156, type: BlockType.CONCRETE })).toBe(true)
     expect(isBoeing747RideBlock({ x: 166, y: 2, z: 156, type: BlockType.SAND })).toBe(false)
     expect(isBoeing747RideBlock({ x: 166, y: 1, z: 156, type: BlockType.CONCRETE })).toBe(false)
+  })
+
+  it('maps a world position back to the flying aircraft ground surface', () => {
+    const offset = { x: 30, y: 14, z: 9 }
+    const groundY = getAircraftRideGroundY({
+      x: 166 + offset.x,
+      z: 156 + offset.z,
+      offset,
+      getGroundY: (x, z) => (Math.round(x) === 166 && Math.round(z) === 156 ? 10.5 : -Infinity),
+    })
+
+    expect(groundY).toBeCloseTo(24.5)
+  })
+
+  it('does not treat the runway as aircraft ride ground', () => {
+    expect(isBoeing747RideGround({
+      x: 166,
+      z: 156,
+      groundY: BOEING_747_RIDE.minBoardGroundY - 0.5,
+    })).toBe(false)
+
+    expect(getAircraftRideGroundY({
+      x: 166,
+      z: 156,
+      offset: { x: 0, y: 40, z: 0 },
+      getGroundY: () => 2.5,
+    })).toBe(-Infinity)
   })
 })
 

@@ -53,10 +53,23 @@ export function isBoeing747RideBlock(block, config = BOEING_747_RIDE) {
   )
 }
 
+export function isBoeing747RideGround({ x, z, groundY }, config = BOEING_747_RIDE) {
+  if (!Number.isFinite(groundY)) return false
+  if (!inBounds(x, z, config.bounds)) return false
+  return groundY >= config.minBoardGroundY
+}
+
+export function getAircraftRideGroundY({ x, z, offset = ZERO_OFFSET, getGroundY }, config = BOEING_747_RIDE) {
+  const baseX = x - (offset.x ?? 0)
+  const baseZ = z - (offset.z ?? 0)
+  const baseGroundY = getGroundY(baseX, baseZ)
+  if (!isBoeing747RideGround({ x: baseX, z: baseZ, groundY: baseGroundY }, config)) return -Infinity
+  return baseGroundY + (offset.y ?? 0)
+}
+
 export function isOnBoeing747Ride({ x, y, z, groundY, isGrounded }, config = BOEING_747_RIDE) {
   if (!isGrounded || !Number.isFinite(groundY)) return false
-  if (!inBounds(x, z, config.bounds)) return false
-  if (groundY < config.minBoardGroundY) return false
+  if (!isBoeing747RideGround({ x, z, groundY }, config)) return false
   return Math.abs(y - (groundY + PLAYER_EYE_HEIGHT)) < 1.2
 }
 
