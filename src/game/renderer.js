@@ -452,6 +452,69 @@ function createBoeing747() {
   return jet
 }
 
+function createNuclearMissile() {
+  const missile = new THREE.Group()
+  missile.name = 'nuclear-missile'
+  missile.visible = false
+
+  const casingMaterial = new THREE.MeshStandardMaterial({
+    color: 0x203823,
+    roughness: 0.46,
+    metalness: 0.24,
+  })
+  const stripeMaterial = new THREE.MeshStandardMaterial({
+    color: 0x9cbd38,
+    emissive: 0x5d7b18,
+    emissiveIntensity: 0.55,
+    roughness: 0.38,
+  })
+  const flameMaterial = new THREE.MeshBasicMaterial({ color: 0xffb23e })
+
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.34, 2.1, 16), casingMaterial)
+  missile.add(body)
+
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.34, 0.72, 16), casingMaterial)
+  nose.position.y = -1.4
+  nose.rotation.z = Math.PI
+  missile.add(nose)
+
+  const stripe = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.28, 16), stripeMaterial)
+  stripe.position.y = -0.1
+  missile.add(stripe)
+
+  const fins = new THREE.Group()
+  fins.position.y = 0.92
+  for (const rotation of [0, Math.PI / 2]) {
+    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.48, 0.09), casingMaterial)
+    fin.rotation.y = rotation
+    fins.add(fin)
+  }
+  missile.add(fins)
+
+  const flame = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.72, 12), flameMaterial)
+  flame.position.y = 1.42
+  missile.add(flame)
+
+  return missile
+}
+
+export function createNuclearMissileManager(scene) {
+  const missile = createNuclearMissile()
+  scene.add(missile)
+
+  return {
+    setMissile(state) {
+      missile.visible = Boolean(state)
+      if (state) missile.position.set(state.position.x, state.position.y, state.position.z)
+    },
+
+    dispose() {
+      scene.remove(missile)
+      disposeObject(missile)
+    },
+  }
+}
+
 function makeInstMesh(type, maxCount) {
   const geo = new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE)
   const mat = createBlockMaterial(type)

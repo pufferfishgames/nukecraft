@@ -4,6 +4,7 @@ import { describe, it, expect } from 'vitest'
 import {
   BLOCK_MATERIAL_PROFILES,
   createBlockMaterial,
+  createNuclearMissileManager,
   createSkyEnvironment,
 } from '../game/renderer.js'
 import { BlockType } from '../game/world.js'
@@ -106,5 +107,27 @@ describe('sky environment', () => {
     expect(jet.visible).toBe(true)
     // nose is at local +X, plane travels world +X — yaw must stay near 0, not 90°
     expect(Math.abs(jet.rotation.y)).toBeLessThan(0.2)
+  })
+})
+
+describe('nuclear missile visual', () => {
+  it('shows, moves, hides, and disposes the dropped missile', () => {
+    const scene = new THREE.Scene()
+    const manager = createNuclearMissileManager(scene)
+    const missile = scene.getObjectByName('nuclear-missile')
+
+    expect(missile).toBeInstanceOf(THREE.Group)
+    expect(missile.children.length).toBeGreaterThanOrEqual(4)
+    expect(missile.visible).toBe(false)
+
+    manager.setMissile({ position: { x: 12, y: 34, z: 56 } })
+    expect(missile.visible).toBe(true)
+    expect(missile.position.toArray()).toEqual([12, 34, 56])
+
+    manager.setMissile(null)
+    expect(missile.visible).toBe(false)
+
+    manager.dispose()
+    expect(scene.getObjectByName('nuclear-missile')).toBeUndefined()
   })
 })

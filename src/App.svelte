@@ -1,7 +1,7 @@
 <script>
   import { onMount, tick } from 'svelte'
   import * as THREE from 'three'
-  import { createRenderer, createRemotePlayerManager } from './game/renderer.js'
+  import { createNuclearMissileManager, createRenderer, createRemotePlayerManager } from './game/renderer.js'
   import { createKeyboardState, computeMovement, computeMovementAxes, KEYS } from './game/controls.js'
   import {
     createAircraftRideController,
@@ -11,6 +11,7 @@
   } from './game/aircraft.js'
   import { joystickAxes, touchLookDelta, JOYSTICK_RADIUS, TOUCH_SENSITIVITY } from './game/touch.js'
   import { stepPlayerMotion } from './game/player.js'
+  import { createNuclearMissileController } from './game/missile.js'
   import { BlockType, BLOCK_COLORS } from './game/world.js'
   import { countConnectedNuke, explosionPositions, NUKE_CHAIN_LIMIT, EXPLOSION_RADIUS } from './game/nuke.js'
   import { passphraseToPrivkey, privkeyToPubkey } from './nostr/identity.js'
@@ -240,6 +241,8 @@
     const { renderer, scene, camera, resize, skyEnvironment } = result
     const remotePlayerManager = createRemotePlayerManager(scene)
     const aircraftRide = createAircraftRideController()
+    const nuclearMissile = createNuclearMissileController()
+    const nuclearMissileManager = createNuclearMissileManager(scene)
     let aircraftRenderGroup = null
     clearRemotePlayers = () => remotePlayerManager.setPlayers([])
     resize()
@@ -248,6 +251,8 @@
     function rebuildAircraftRideGroup() {
       aircraftRenderGroup?.reset()
       aircraftRide.reset()
+      nuclearMissile.reset()
+      nuclearMissileManager.setMissile(null)
       aircraftRenderGroup = worldManager.createRenderGroup(isBoeing747RideBlock)
     }
 
@@ -256,6 +261,8 @@
 
     resetCamera = () => {
       aircraftRide.reset()
+      nuclearMissile.reset()
+      nuclearMissileManager.setMissile(null)
       aircraftRenderGroup?.reset()
       camera.position.set(16, 12, 16)
     }
@@ -580,6 +587,16 @@
       const wantsJump    = isMobile ? mobileJump    : keyboard.isDown(KEYS.JUMP)
       const wantsDescend = isMobile ? mobileDescend : keyboard.isDown(KEYS.DESCEND)
       const getGroundY = (x, z) => worldManager.getGroundY(x, z)
+      const missileFrame = nuclearMissile.update({
+        delta,
+        rideActive: rideFrame.active,
+        onAircraft: isGroundedOnAircraft,
+        wantsJump,
+        aircraftOffset: aircraftRideOffset,
+        getGroundY,
+      })
+      nuclearMissileManager.setMissile(missileFrame.missile)
+      if (missileFrame.impacted) triggerExplosion(missileFrame.impacted)
       const stepped = stepPlayerMotion({
         position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
         velocityY,
@@ -658,6 +675,7 @@
       ghostMesh.geometry.dispose()
       ghostMat.dispose()
       remotePlayerManager.dispose()
+      nuclearMissileManager.dispose()
       clearRemotePlayers = () => {}
       syncRemoteBlocks = () => {}
       resetAircraftRide = () => {}
